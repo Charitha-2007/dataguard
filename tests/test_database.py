@@ -1,11 +1,13 @@
 """Unit and integration tests for DataGuard Database and Repository.
 
 Verifies schema creation, CRUD operations, foreign key constraints,
-and cryptographic audit log integrity verification.
+and cryptographic audit log integrity verification with full test isolation.
 """
 
 import pytest
-import sqlite3
+from pathlib import Path
+from config.settings import DATA_DIR, DATABASE_PATH
+from src.database.connection import set_database_path, get_db
 from src.database.models import (
     init_db,
     Pipeline,
@@ -14,13 +16,42 @@ from src.database.models import (
     RecoveryAction,
 )
 from src.database.repository import DataGuardRepository
-from src.database.connection import get_db
+
+# Dedicated test database path
+TEST_DB_PATH = DATA_DIR / "test_dataguard.db"
 
 
 @pytest.fixture(autouse=True)
-def setup_test_db():
-    """Initializes the database before each test run."""
+def setup_isolated_test_db():
+    """Points tests to an isolated test database and cleans tables before each test.
+    
+    This ensures test idempotency: tests can run repeatedly without primary key 
+    or unique constraint collisions, and without polluting development data.
+    """
+    # 1. Switch to dedicated test database
+    set_database_path(TEST_DB_PATH)
+    
+    # 2. Ensure schema and baseline seed data exist
     init_db()
+    
+    # 3. Clean operational tables before every test run for complete isolation
+    with get_db() as conn:
+        conn.execute("DELETE FROM recovery_actions;")
+        conn.execute("DELETE FROM incidents;")
+        conn.execute("DELETE FROM pipeline_runs;")
+        conn.execute("DELETE FROM audit_logs;")
+
+    yield
+
+    # 4. Clean operational tables after test run
+    with get_db() as conn:
+        conn.execute("DELETE FROM recovery_actions;")
+        conn.execute("DELETE FROM incidents;")
+        conn.execute("DELETE FROM pipeline_runs;")
+        conn.execute("DELETE FROM audit_logs;")
+
+    # Reset active DB back to default
+    set_database_path(DATABASE_PATH)
 
 
 def test_init_db_seeds_baseline_data():
@@ -155,7 +186,7 @@ def test_audit_log_hash_chain_and_tamper_detection():
     
     # Tamper simulation: directly edit a row in SQLite without updating the hash
     with get_db() as conn:
-        conn.execute("UPDATE audit_logs SET actor = 'malicious_hacker' WHERE id = 2;")
+        conn.execute("UPDATE audit_logs SET actor = 'malicious_hacker' WHERE id = (SELECT id FROM audit_logs LIMIT 1 OFFSET 1);")
     
     # Integrity check should immediately detect tampering!
     tamper_result = repo.verify_audit_log_integrity()

@@ -1,0 +1,49 @@
+name: DataGuard CI/CD Pipeline
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+
+jobs:
+  test-and-lint:
+    name: Run Automated Tests & Code Quality
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Check out the repository code
+      - name: Check out repository code
+        uses: actions/checkout@v4
+
+      # Step 2: Set up Python runtime with caching
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      # Step 3: Install all dependencies from requirements.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # Step 4: Validate Python syntax across all packages
+      - name: Verify source code syntax
+        run: |
+          python -m py_compile src/ui/app.py
+          python -m py_compile src/core/*.py
+          python -m py_compile src/database/*.py
+          python -m py_compile src/recovery/*.py
+          python -m py_compile src/services/*.py
+
+      # Step 5: Run full Pytest test suite (all 40 unit and integration tests)
+      - name: Run Pytest test suite
+        run: |
+          pytest tests/ -v --color=yes
+
+      # Step 6: Verify Cryptographic Audit Integrity
+      - name: Assert audit ledger integrity
+        run: |
+          python -c "from src.database.models import init_db; from src.services.audit_service import AuditService; init_db(); svc = AuditService(); res = svc.verify_integrity(); assert res['is_valid'], 'Audit chain broken!'"

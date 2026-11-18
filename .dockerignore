@@ -1,0 +1,26 @@
+# Git
+.git/
+.gitignore
+
+# Python Environments & Cache
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local databases & transient files
+*.db
+*.sqlite3
+data/mock_pipeline_data/*
+data/processed/*
+
+# IDE and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

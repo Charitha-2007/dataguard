@@ -27,6 +27,7 @@ def setup_isolated_test_db():
         conn.execute("DELETE FROM incidents;")
         conn.execute("DELETE FROM pipeline_runs;")
         conn.execute("DELETE FROM audit_logs;")
+        conn.execute("DELETE FROM knowledge_base WHERE incident_type = 'CONNECTION_TIMEOUT';")
 
     yield
 
@@ -35,6 +36,7 @@ def setup_isolated_test_db():
         conn.execute("DELETE FROM incidents;")
         conn.execute("DELETE FROM pipeline_runs;")
         conn.execute("DELETE FROM audit_logs;")
+        conn.execute("DELETE FROM knowledge_base WHERE incident_type = 'CONNECTION_TIMEOUT';")
 
     set_database_path(DATABASE_PATH)
 

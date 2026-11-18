@@ -123,12 +123,32 @@ CREATE TABLE IF NOT EXISTS knowledge_base (
     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 
+-- 9. Uploaded Datasets Catalog
+CREATE TABLE IF NOT EXISTS uploaded_datasets (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    filename TEXT NOT NULL,
+    file_type TEXT NOT NULL CHECK(file_type IN ('csv', 'xlsx', 'xls', 'json')),
+    file_size_bytes INTEGER NOT NULL,
+    row_count INTEGER NOT NULL DEFAULT 0,
+    column_count INTEGER NOT NULL DEFAULT 0,
+    columns_json TEXT NOT NULL DEFAULT '[]',
+    quality_score REAL DEFAULT 0.0,
+    missing_count INTEGER DEFAULT 0,
+    duplicate_count INTEGER DEFAULT 0,
+    file_path TEXT NOT NULL,
+    uploaded_by TEXT NOT NULL DEFAULT 'admin',
+    uploaded_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    status TEXT NOT NULL DEFAULT 'UPLOADED' CHECK(status IN ('UPLOADED', 'PROCESSED', 'FAILED'))
+);
+
 -- Performance Indexes
 CREATE INDEX IF NOT EXISTS idx_runs_pipeline_id ON pipeline_runs(pipeline_id);
 CREATE INDEX IF NOT EXISTS idx_runs_status ON pipeline_runs(status);
 CREATE INDEX IF NOT EXISTS idx_incidents_status ON incidents(status);
 CREATE INDEX IF NOT EXISTS idx_incidents_pipeline ON incidents(pipeline_id);
 CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_logs(entity_type, entity_id);
+CREATE INDEX IF NOT EXISTS idx_datasets_status ON uploaded_datasets(status);
 """
 
 
@@ -216,6 +236,25 @@ class AuditRecord:
         """Calculates a SHA-256 tamper-evident hash for this audit record."""
         payload = f"{prev_hash}|{self.timestamp}|{self.actor}|{self.action}|{self.entity_type}|{self.entity_id}|{json.dumps(self.details, sort_keys=True)}"
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+@dataclass
+class UploadedDataset:
+    id: str
+    name: str
+    filename: str
+    file_type: str
+    file_size_bytes: int
+    row_count: int
+    column_count: int
+    columns_json: str
+    quality_score: float = 0.0
+    missing_count: int = 0
+    duplicate_count: int = 0
+    file_path: str = ""
+    uploaded_by: str = "admin"
+    uploaded_at: Optional[str] = None
+    status: str = "UPLOADED"
 
 
 # =====================================================================

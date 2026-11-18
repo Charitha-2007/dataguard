@@ -13,9 +13,10 @@ DATA_DIR = BASE_DIR / "data"
 RAW_DATA_DIR = DATA_DIR / "raw"
 PROCESSED_DATA_DIR = DATA_DIR / "processed"
 MOCK_DATA_DIR = DATA_DIR / "mock_pipeline_data"
+UPLOAD_DATA_DIR = DATA_DIR / "uploads"
 
 # Ensure runtime directories exist
-for directory in [DATA_DIR, RAW_DATA_DIR, PROCESSED_DATA_DIR, MOCK_DATA_DIR]:
+for directory in [DATA_DIR, RAW_DATA_DIR, PROCESSED_DATA_DIR, MOCK_DATA_DIR, UPLOAD_DATA_DIR]:
     directory.mkdir(parents=True, exist_ok=True)
 
 # Database Configuration

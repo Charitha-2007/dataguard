@@ -19,6 +19,7 @@ data/mock_pipeline_data/*.csv
 data/mock_pipeline_data/*.json
 data/processed/*.csv
 data/raw/*
+data/uploads/*
 
 # IDE & OS files
 .vscode/

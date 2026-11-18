@@ -16,6 +16,7 @@ from src.database.models import (
     Incident,
     RecoveryAction,
     AuditRecord,
+    UploadedDataset,
 )
 
 
@@ -382,3 +383,116 @@ class DataGuardRepository:
             )
             row = cursor.fetchone()
             return dict(row) if row else None
+
+    # -----------------------------------------------------------------
+    # UPLOADED DATASETS
+    # -----------------------------------------------------------------
+
+    def create_dataset(self, dataset: UploadedDataset) -> None:
+        """Saves a new uploaded dataset record into the catalog."""
+        with get_db() as conn:
+            conn.execute(
+                """INSERT INTO uploaded_datasets 
+                   (id, name, filename, file_type, file_size_bytes, row_count, column_count, 
+                    columns_json, quality_score, missing_count, duplicate_count, file_path, uploaded_by, status)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);""",
+                (
+                    dataset.id,
+                    dataset.name,
+                    dataset.filename,
+                    dataset.file_type,
+                    dataset.file_size_bytes,
+                    dataset.row_count,
+                    dataset.column_count,
+                    dataset.columns_json,
+                    dataset.quality_score,
+                    dataset.missing_count,
+                    dataset.duplicate_count,
+                    dataset.file_path,
+                    dataset.uploaded_by,
+                    dataset.status,
+                ),
+            )
+
+    def get_all_datasets(self) -> List[Dict[str, Any]]:
+        """Retrieves all registered datasets sorted by upload time descending."""
+        with get_db() as conn:
+            cursor = conn.execute(
+                "SELECT * FROM uploaded_datasets ORDER BY uploaded_at DESC;"
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_dataset(self, dataset_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieves a single dataset record by its unique identifier."""
+        with get_db() as conn:
+            cursor = conn.execute(
+                "SELECT * FROM uploaded_datasets WHERE id = ?;", (dataset_id,)
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    def update_dataset_metrics(
+        self,
+        dataset_id: str,
+        quality_score: float,
+        missing_count: int,
+        duplicate_count: int,
+        status: str = "PROCESSED",
+    ) -> None:
+        """Updates analysis metrics for an uploaded dataset."""
+        with get_db() as conn:
+            conn.execute(
+                """UPDATE uploaded_datasets 
+                   SET quality_score = ?, missing_count = ?, duplicate_count = ?, status = ?
+                   WHERE id = ?;""",
+                (quality_score, missing_count, duplicate_count, status, dataset_id),
+            )
+
+    def update_dataset_file(
+        self,
+        dataset_id: str,
+        name: str,
+        filename: str,
+        file_type: str,
+        file_size_bytes: int,
+        row_count: int,
+        column_count: int,
+        columns_json: str,
+        file_path: str,
+        quality_score: float = 0.0,
+        missing_count: int = 0,
+        duplicate_count: int = 0,
+        status: str = "UPLOADED",
+    ) -> None:
+        """Replaces an existing dataset's file and schema attributes."""
+        with get_db() as conn:
+            conn.execute(
+                """UPDATE uploaded_datasets
+                   SET name = ?, filename = ?, file_type = ?, file_size_bytes = ?,
+                       row_count = ?, column_count = ?, columns_json = ?, file_path = ?,
+                       quality_score = ?, missing_count = ?, duplicate_count = ?, status = ?
+                   WHERE id = ?;""",
+                (
+                    name,
+                    filename,
+                    file_type,
+                    file_size_bytes,
+                    row_count,
+                    column_count,
+                    columns_json,
+                    file_path,
+                    quality_score,
+                    missing_count,
+                    duplicate_count,
+                    status,
+                    dataset_id,
+                ),
+            )
+
+    def delete_dataset(self, dataset_id: str) -> bool:
+        """Deletes a dataset entry from the catalog."""
+        with get_db() as conn:
+            cursor = conn.execute(
+                "DELETE FROM uploaded_datasets WHERE id = ?;", (dataset_id,)
+            )
+            return cursor.rowcount > 0

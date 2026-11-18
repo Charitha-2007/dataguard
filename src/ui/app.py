@@ -1,11 +1,6 @@
-"""DataGuard - Intelligent Data Pipeline Observability & Automated Recovery Platform.
-
-Premium Dark-Mode Command Center:
-- Luxury Glassmorphism + Neon Glow Design System
-- Animated gradient header & sidebar branding
-- Rich KPI cards with colored accent bars
-- Plotly dark charts with custom color palettes
-- Responsive grid layouts with HTML/CSS components
+"""
+DataGuard ─ Intelligent Pipeline Reliability & Recovery Platform
+Pure Streamlit command center — native components, custom theme, rich Plotly charts.
 """
 
 import sys
@@ -20,6 +15,7 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 from datetime import datetime
 
 from config.settings import DEFAULT_NULL_THRESHOLD_PCT, DEFAULT_PSI_DRIFT_THRESHOLD
@@ -41,410 +37,89 @@ from src.recovery.approval_workflow import ApprovalWorkflowManager
 from src.recovery.recovery_executor import RecoveryExecutor
 from src.recovery.verifier import RecoveryVerifier
 
-# ── Page config ────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="DataGuard | Observability Platform",
+    page_title="DataGuard Platform",
     page_icon="🛡️",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  PREMIUM DESIGN SYSTEM — CSS
-# ══════════════════════════════════════════════════════════════════════════════
-PREMIUM_CSS = """
+# ── Minimal CSS: only what Streamlit's theme can't do natively ───────────────
+st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap');
-
-/* ── Global Reset ─────────────────────────────────────────────────────── */
-:root {
-    --bg:          #060b18;
-    --bg2:         #0d1526;
-    --surface:     rgba(15, 23, 42, 0.80);
-    --surface2:    rgba(22, 33, 62, 0.65);
-    --border:      rgba(99, 179, 255, 0.10);
-    --border2:     rgba(99, 179, 255, 0.20);
-    --cyan:        #22d3ee;
-    --blue:        #60a5fa;
-    --indigo:      #818cf8;
-    --violet:      #a78bfa;
-    --emerald:     #34d399;
-    --amber:       #fbbf24;
-    --rose:        #f87171;
-    --txt:         #e2e8f0;
-    --txt2:        #94a3b8;
-    --txt3:        #64748b;
-    --glow-cyan:   0 0 24px rgba(34, 211, 238, 0.35);
-    --glow-blue:   0 0 24px rgba(96, 165, 250, 0.35);
-    --glow-rose:   0 0 24px rgba(248, 113, 113, 0.35);
-    --glow-emerald:0 0 24px rgba(52, 211, 153, 0.35);
-    --radius:      16px;
-    --radius-sm:   10px;
+/* Smooth animated gradient on the very top bar */
+header[data-testid="stHeader"] {
+    background: linear-gradient(90deg,#0A0F1E,#0d1b40,#0A0F1E) !important;
+    border-bottom: 1px solid rgba(0,201,255,0.12) !important;
 }
-
-html, body, [class*="css"] {
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
-    color: var(--txt);
-}
-
-/* ── App Background ───────────────────────────────────────────────────── */
-.stApp {
-    background:
-        radial-gradient(ellipse 80% 50% at 10% -10%, rgba(34,211,238,0.07) 0%, transparent 60%),
-        radial-gradient(ellipse 60% 40% at 90% 110%, rgba(96,165,250,0.07) 0%, transparent 60%),
-        linear-gradient(180deg, #060b18 0%, #07101f 100%);
-    min-height: 100vh;
-}
-
-/* ── Sidebar ──────────────────────────────────────────────────────────── */
-[data-testid="stSidebar"] {
-    background: linear-gradient(180deg, #09112a 0%, #060e22 100%) !important;
-    border-right: 1px solid var(--border2) !important;
-}
-[data-testid="stSidebar"] > div:first-child { padding-top: 0 !important; }
-
-/* ── Metric Cards ─────────────────────────────────────────────────────── */
+/* Metric card lift on hover */
 div[data-testid="metric-container"] {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 20px 22px 18px !important;
-    backdrop-filter: blur(20px);
-    box-shadow: 0 4px 32px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.05);
-    transition: transform 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
-    position: relative;
-    overflow: hidden;
-}
-div[data-testid="metric-container"]::before {
-    content: '';
-    position: absolute;
-    top: 0; left: 0; right: 0;
-    height: 2px;
-    background: linear-gradient(90deg, var(--cyan), var(--blue));
-    border-radius: var(--radius) var(--radius) 0 0;
+    border-radius: 14px !important;
+    padding: 18px !important;
+    border: 1px solid rgba(0,201,255,0.14) !important;
+    transition: transform .2s, box-shadow .2s;
 }
 div[data-testid="metric-container"]:hover {
     transform: translateY(-3px);
-    border-color: rgba(34,211,238,0.3);
-    box-shadow: 0 8px 40px rgba(0,0,0,0.6), var(--glow-cyan);
+    box-shadow: 0 8px 32px rgba(0,201,255,.18);
 }
-div[data-testid="metric-container"] [data-testid="stMetricLabel"] {
-    font-size: 11px !important;
-    font-weight: 600 !important;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--txt2) !important;
+/* Progress bar color */
+.stProgress > div > div { background: linear-gradient(90deg,#00C9FF,#7C3AED) !important; }
+/* Sidebar top padding */
+[data-testid="stSidebar"] > div:first-child { padding-top: 1rem !important; }
+/* Tab active color */
+button[data-baseweb="tab"][aria-selected="true"] {
+    color: #00C9FF !important;
+    border-bottom: 2px solid #00C9FF !important;
 }
-div[data-testid="metric-container"] [data-testid="stMetricValue"] {
-    font-size: 28px !important;
-    font-weight: 800 !important;
-    color: var(--txt) !important;
-    line-height: 1.1;
-}
-div[data-testid="metric-container"] [data-testid="stMetricDelta"] {
-    font-size: 12px !important;
-    font-weight: 500;
-}
-
-/* ── Buttons ──────────────────────────────────────────────────────────── */
-.stButton > button {
-    border-radius: var(--radius-sm) !important;
-    font-family: 'Inter', sans-serif !important;
-    font-weight: 600 !important;
-    font-size: 13px !important;
-    padding: 9px 20px !important;
-    transition: all 0.2s ease !important;
-    border: 1px solid var(--border2) !important;
-    background: var(--surface2) !important;
-    color: var(--txt) !important;
-}
-.stButton > button:hover {
-    border-color: var(--cyan) !important;
-    box-shadow: var(--glow-cyan) !important;
-    transform: translateY(-1px) !important;
-}
-.stButton > button[kind="primary"] {
-    background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%) !important;
-    border: none !important;
-    color: #fff !important;
-    box-shadow: 0 4px 20px rgba(14,165,233,0.4) !important;
-}
-.stButton > button[kind="primary"]:hover {
-    box-shadow: 0 6px 30px rgba(14,165,233,0.65) !important;
-    transform: translateY(-2px) !important;
-}
-
-/* ── Selectbox / Inputs ───────────────────────────────────────────────── */
-.stSelectbox > div > div,
-.stTextInput > div > div > input,
-.stSlider > div {
-    background: var(--surface) !important;
-    border: 1px solid var(--border) !important;
-    border-radius: var(--radius-sm) !important;
-    color: var(--txt) !important;
-}
-.stSelectbox > div > div:focus-within,
-.stTextInput > div > div > input:focus {
-    border-color: var(--cyan) !important;
-    box-shadow: 0 0 0 2px rgba(34,211,238,0.15) !important;
-}
-
-/* ── Tabs ─────────────────────────────────────────────────────────────── */
-.stTabs [data-baseweb="tab-list"] {
-    background: var(--surface) !important;
-    border-radius: var(--radius-sm) !important;
-    padding: 4px !important;
-    border: 1px solid var(--border) !important;
-    gap: 2px !important;
-}
-.stTabs [data-baseweb="tab"] {
-    border-radius: 8px !important;
-    padding: 8px 20px !important;
-    font-weight: 600 !important;
-    font-size: 13px !important;
-    color: var(--txt2) !important;
-    transition: all 0.2s !important;
-}
-.stTabs [aria-selected="true"] {
-    background: linear-gradient(135deg, rgba(14,165,233,0.25), rgba(99,102,241,0.25)) !important;
-    color: var(--cyan) !important;
-    border: 1px solid rgba(34,211,238,0.3) !important;
-}
-
-/* ── DataFrames ───────────────────────────────────────────────────────── */
-div[data-testid="stDataFrame"] {
-    border: 1px solid var(--border) !important;
-    border-radius: var(--radius) !important;
-    overflow: hidden !important;
-    background: var(--surface) !important;
-}
-
-/* ── Alerts ───────────────────────────────────────────────────────────── */
-.stSuccess, .stError, .stWarning, .stInfo {
-    border-radius: var(--radius-sm) !important;
-    border: none !important;
-}
-
-/* ── Headings ─────────────────────────────────────────────────────────── */
-h1, h2, h3, h4, h5 {
-    color: var(--txt) !important;
-    font-weight: 700 !important;
-    letter-spacing: -0.025em !important;
-}
-hr { border-color: var(--border) !important; margin: 20px 0 !important; }
-
-/* ── Spinner ──────────────────────────────────────────────────────────── */
-.stSpinner > div { border-top-color: var(--cyan) !important; }
-
-/* ── Expanders ────────────────────────────────────────────────────────── */
-details[data-testid="stExpander"] {
-    background: var(--surface) !important;
-    border: 1px solid var(--border) !important;
-    border-radius: var(--radius-sm) !important;
-    margin-bottom: 8px !important;
-}
-details[data-testid="stExpander"] summary {
-    font-weight: 600 !important;
-    color: var(--txt) !important;
-    padding: 12px 16px !important;
-}
-
-/* ── Radio Navigation ─────────────────────────────────────────────────── */
-[data-testid="stRadio"] > div { gap: 4px !important; }
-[data-testid="stRadio"] label {
-    background: transparent !important;
-    border-radius: 8px !important;
-    padding: 8px 12px !important;
-    transition: background 0.15s !important;
-    color: var(--txt2) !important;
-    font-weight: 500 !important;
-}
-[data-testid="stRadio"] label:hover {
-    background: rgba(34,211,238,0.07) !important;
-    color: var(--txt) !important;
-}
-
-/* ── Custom HTML Components ───────────────────────────────────────────── */
-
-/* Page header banner */
-.dg-page-header {
-    background: linear-gradient(135deg, rgba(14,165,233,0.12) 0%, rgba(99,102,241,0.12) 100%);
-    border: 1px solid rgba(99,179,255,0.15);
-    border-radius: var(--radius);
-    padding: 24px 28px;
-    margin-bottom: 24px;
-    position: relative;
-    overflow: hidden;
-}
-.dg-page-header::before {
-    content: '';
-    position: absolute;
-    top: 0; left: 0; right: 0;
-    height: 1px;
-    background: linear-gradient(90deg, transparent, var(--cyan), var(--indigo), transparent);
-}
-.dg-page-header h1 {
-    margin: 0 0 6px 0 !important;
-    font-size: 26px !important;
-    font-weight: 800 !important;
-    background: linear-gradient(90deg, #e2e8f0 30%, #94a3b8);
-    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-}
-.dg-page-header p {
-    margin: 0 !important;
-    color: var(--txt2) !important;
-    font-size: 14px !important;
-    line-height: 1.6 !important;
-}
-
-/* KPI card with colored left bar */
-.dg-kpi {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 18px 20px;
-    backdrop-filter: blur(20px);
-    box-shadow: 0 4px 32px rgba(0,0,0,0.4);
-    border-left: 3px solid var(--accent, var(--cyan));
-    transition: transform 0.2s, box-shadow 0.2s;
-    margin-bottom: 12px;
-}
-.dg-kpi:hover { transform: translateY(-2px); box-shadow: 0 8px 40px rgba(0,0,0,0.5); }
-.dg-kpi-label { font-size: 11px; font-weight: 700; text-transform: uppercase;
-    letter-spacing: 0.08em; color: var(--txt3); margin-bottom: 6px; }
-.dg-kpi-value { font-size: 30px; font-weight: 800; color: var(--txt); line-height: 1; margin-bottom: 4px; }
-.dg-kpi-sub { font-size: 12px; color: var(--txt2); }
-
-/* Pipeline health card */
-.dg-pipeline-card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 18px 20px;
-    backdrop-filter: blur(16px);
-    box-shadow: 0 4px 24px rgba(0,0,0,0.35);
-    transition: transform 0.2s, border-color 0.2s;
-    height: 100%;
-}
-.dg-pipeline-card:hover { transform: translateY(-3px); border-color: var(--border2); }
-.dg-pipeline-tag {
-    font-size: 10px; font-weight: 700; text-transform: uppercase;
-    letter-spacing: 0.08em; color: var(--cyan); margin-bottom: 8px;
-}
-.dg-pipeline-name { font-size: 15px; font-weight: 700; color: var(--txt); margin-bottom: 4px; }
-.dg-pipeline-sla { font-size: 12px; color: var(--txt2); margin-bottom: 12px; }
-.dg-compliance-num { font-size: 32px; font-weight: 900; line-height: 1; }
-.dg-compliance-label { font-size: 11px; color: var(--txt3); margin-left: 6px; }
-
-/* Badge pills */
-.badge {
-    display: inline-flex; align-items: center; gap: 4px;
-    padding: 3px 10px; border-radius: 9999px;
-    font-size: 11px; font-weight: 700;
-    letter-spacing: 0.04em; text-transform: uppercase;
-}
-.badge-green  { background: rgba(52,211,153,0.12); color: #34d399; border: 1px solid rgba(52,211,153,0.3); }
-.badge-amber  { background: rgba(251,191,36,0.12);  color: #fbbf24; border: 1px solid rgba(251,191,36,0.3); }
-.badge-red    { background: rgba(248,113,113,0.12); color: #f87171; border: 1px solid rgba(248,113,113,0.3); }
-.badge-cyan   { background: rgba(34,211,238,0.12);  color: #22d3ee; border: 1px solid rgba(34,211,238,0.3); }
-.badge-indigo { background: rgba(129,140,248,0.12); color: #818cf8; border: 1px solid rgba(129,140,248,0.3); }
-
-/* Section divider with label */
-.dg-section-label {
-    display: flex; align-items: center; gap: 10px;
-    margin: 24px 0 16px 0;
-}
-.dg-section-label span {
-    font-size: 13px; font-weight: 700; text-transform: uppercase;
-    letter-spacing: 0.08em; color: var(--txt2);
-    white-space: nowrap;
-}
-.dg-section-label::after {
-    content: ''; flex: 1;
-    height: 1px; background: var(--border);
-}
-
-/* Stat row in incident card */
-.dg-stat-row { display: flex; gap: 16px; flex-wrap: wrap; margin: 12px 0; }
-.dg-stat { background: var(--surface2); border: 1px solid var(--border);
-    border-radius: 8px; padding: 10px 16px; flex: 1; min-width: 110px; }
-.dg-stat-k { font-size: 10px; font-weight: 700; text-transform: uppercase;
-    letter-spacing: 0.06em; color: var(--txt3); margin-bottom: 4px; }
-.dg-stat-v { font-size: 16px; font-weight: 700; color: var(--txt); font-family: 'JetBrains Mono', monospace; }
-
-/* Code / mono text */
-.mono { font-family: 'JetBrains Mono', monospace; font-size: 12px;
-    background: rgba(0,0,0,0.3); padding: 2px 8px; border-radius: 4px;
-    color: var(--cyan); }
-
-/* Sidebar brand block */
-.dg-brand {
-    background: linear-gradient(135deg, rgba(14,165,233,0.15), rgba(99,102,241,0.15));
-    border: 1px solid rgba(34,211,238,0.2);
-    border-radius: 14px;
-    padding: 20px 18px;
-    margin: 16px 0 20px 0;
-    text-align: center;
-}
-.dg-brand-logo { font-size: 40px; margin-bottom: 8px; }
-.dg-brand-name {
-    font-size: 22px; font-weight: 900;
-    background: linear-gradient(90deg, #22d3ee, #818cf8);
-    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-    letter-spacing: -0.03em;
-}
-.dg-brand-sub {
-    font-size: 10px; font-weight: 600; text-transform: uppercase;
-    letter-spacing: 0.1em; color: var(--txt3); margin-top: 2px;
-}
-
-/* Live dot indicator */
-.live-dot {
-    display: inline-block; width: 7px; height: 7px;
-    border-radius: 50%; background: #34d399;
-    box-shadow: 0 0 8px #34d399;
-    animation: pulse 2s infinite;
-    margin-right: 5px;
-}
-@keyframes pulse {
-    0%, 100% { opacity: 1; transform: scale(1); }
-    50%       { opacity: 0.5; transform: scale(0.85); }
-}
-
-/* Scrollbar */
-::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(99,179,255,0.2); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(99,179,255,0.4); }
+/* Cleaner expander */
+details summary { font-weight: 600 !important; }
+/* Hide default streamlit footer */
+footer { visibility: hidden; }
 </style>
-"""
-st.markdown(PREMIUM_CSS, unsafe_allow_html=True)
+""", unsafe_allow_html=True)
 
 
-# ── Chart theme helper ─────────────────────────────────────────────────────────
-def chart_theme(fig, height=380):
+# ── Plotly chart defaults ─────────────────────────────────────────────────────
+CHART_COLORS = ["#00C9FF", "#7C3AED", "#10B981", "#F59E0B", "#F43F5E", "#8B5CF6"]
+
+def styled_chart(fig, height=380, title=""):
     fig.update_layout(
         template="plotly_dark",
         paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(13,21,38,0.6)",
-        font=dict(family="Inter", size=12, color="#94a3b8"),
-        margin=dict(l=16, r=16, t=36, b=16),
+        plot_bgcolor="rgba(255,255,255,0.03)",
         height=height,
-        xaxis=dict(gridcolor="rgba(99,179,255,0.06)", zeroline=False, linecolor="rgba(99,179,255,0.1)"),
-        yaxis=dict(gridcolor="rgba(99,179,255,0.06)", zeroline=False, linecolor="rgba(99,179,255,0.1)"),
-        legend=dict(bgcolor="rgba(0,0,0,0)", bordercolor="rgba(99,179,255,0.15)", borderwidth=1),
+        title=dict(text=title, font=dict(size=14, color="#94A3B8"), x=0, pad=dict(l=4)),
+        margin=dict(l=20, r=20, t=44 if title else 20, b=20),
+        font=dict(family="Inter, sans-serif", size=12, color="#94A3B8"),
+        xaxis=dict(gridcolor="rgba(255,255,255,0.05)", zeroline=False),
+        yaxis=dict(gridcolor="rgba(255,255,255,0.05)", zeroline=False),
+        legend=dict(bgcolor="rgba(0,0,0,0)", borderwidth=0),
+        colorway=CHART_COLORS,
     )
     return fig
 
 
-def badge(text, color="cyan"):
-    return f'<span class="badge badge-{color}">{text}</span>'
-
-def section(label):
-    st.markdown(f'<div class="dg-section-label"><span>{label}</span></div>', unsafe_allow_html=True)
+def grade_color(grade):
+    return {"A": "🟢", "B": "🟢", "C": "🟡", "D": "🟠", "F": "🔴"}.get(grade, "⚪")
 
 
-# ── Init ───────────────────────────────────────────────────────────────────────
+def severity_color(sev):
+    return {"P1": "🔴", "P2": "🟠", "P3": "🟡", "P4": "🔵"}.get(sev, "⚪")
+
+
+def status_icon(status):
+    return {
+        "OPEN": "🔥", "IN_REVIEW": "🔍",
+        "RECOVERED": "✅", "CLOSED": "🔒",
+        "SUCCESS": "✅", "FAILED": "❌", "RUNNING": "⚡",
+    }.get(status, "❓")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  INIT
+# ─────────────────────────────────────────────────────────────────────────────
 init_db()
 repo             = DataGuardRepository()
 simulator        = PipelineSimulator(repo=repo)
@@ -457,241 +132,286 @@ notifier         = NotificationDispatcher()
 incident_manager = IncidentManager(repo=repo, notifier=notifier)
 audit_service    = AuditService(repo=repo)
 kb_service       = KnowledgeBaseService(repo=repo)
-auth_service     = AuthService()
 recommender      = RecoveryRecommendationEngine(repo=repo)
 workflow         = ApprovalWorkflowManager(repo=repo)
 executor         = RecoveryExecutor(repo=repo, simulator=simulator)
 verifier         = RecoveryVerifier(repo=repo, quality_engine=quality_engine)
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ─────────────────────────────────────────────────────────────────────────────
 #  SIDEBAR
-# ══════════════════════════════════════════════════════════════════════════════
+# ─────────────────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("""
-    <div class="dg-brand">
-        <div class="dg-brand-logo">🛡️</div>
-        <div class="dg-brand-name">DataGuard</div>
-        <div class="dg-brand-sub">Observability Platform</div>
-    </div>
-    """, unsafe_allow_html=True)
+    # Brand
+    st.markdown("## 🛡️ DataGuard")
+    st.caption("Intelligent Pipeline Observability")
+    st.divider()
 
-    st.markdown("**👤 Active Profile**")
-    user_choice = st.selectbox(
-        "Select Role",
-        ["admin — Full Control", "engineer_alice — Operations", "viewer_bob — Read-Only"],
-        label_visibility="collapsed",
-    )
+    # Role selector
+    st.markdown("**Active Profile**")
+    role_map = {
+        "🔑 Admin — Full Control":        ("admin",          "admin",    "admin@dataguard.local"),
+        "⚙️ Engineer — Operations":        ("engineer_alice", "engineer", "alice@dataguard.local"),
+        "👁️ Viewer — Read Only":           ("viewer_bob",     "viewer",   "bob@dataguard.local"),
+    }
+    chosen = st.selectbox("Role", list(role_map.keys()), label_visibility="collapsed")
+    uname, urole, uemail = role_map[chosen]
+    current_user = UserSession(username=uname, role=urole, email=uemail)
 
-    if "admin" in user_choice:
-        current_user = UserSession(username="admin", role="admin", email="admin@dataguard.local")
-        st.markdown(badge("🔑 Admin · Full Access", "green"), unsafe_allow_html=True)
-    elif "engineer" in user_choice:
-        current_user = UserSession(username="engineer_alice", role="engineer", email="alice@dataguard.local")
-        st.markdown(badge("⚙️ Engineer · Operations", "cyan"), unsafe_allow_html=True)
-    else:
-        current_user = UserSession(username="viewer_bob", role="viewer", email="bob@dataguard.local")
-        st.markdown(badge("👁️ Viewer · Read-Only", "amber"), unsafe_allow_html=True)
+    role_colors = {"admin": "🟢 Full Access", "engineer": "🔵 Operations", "viewer": "🟡 Read-Only"}
+    st.caption(role_colors[urole])
+    st.divider()
 
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    menu = st.radio(
-        "Navigation",
+    # Navigation
+    st.markdown("**Navigation**")
+    page = st.radio(
+        "Go to",
         [
-            "📊  Observability",
+            "📊  Overview",
             "🧪  Simulator Lab",
             "🚨  Incidents & Recovery",
-            "📈  Drift & Anomalies",
-            "🛡️  Audit & Knowledge Base",
+            "📈  Drift Explorer",
+            "🛡️  Audit & Knowledge",
         ],
         label_visibility="collapsed",
     )
+    st.divider()
 
-    st.markdown("<br>", unsafe_allow_html=True)
-    # Quick live status dot
-    open_count = len(repo.get_all_incidents(status="OPEN"))
-    color = "#34d399" if open_count == 0 else "#f87171"
-    st.markdown(
-        f'<div style="font-size:12px;color:#64748b;padding:0 4px;">'
-        f'<span style="display:inline-block;width:7px;height:7px;border-radius:50%;'
-        f'background:{color};box-shadow:0 0 8px {color};margin-right:6px;"></span>'
-        f'{"All Systems Operational" if open_count == 0 else f"{open_count} Open Incident(s)"}'
-        f'</div>',
-        unsafe_allow_html=True,
-    )
+    # Live status chip
+    open_inc = repo.get_all_incidents(status="OPEN")
+    if len(open_inc) == 0:
+        st.success("✅ All Systems Healthy")
+    else:
+        st.error(f"🔥 {len(open_inc)} Active Incident(s)")
+
+    st.caption(f"🕐 {datetime.now().strftime('%H:%M:%S')}  ·  DataGuard v1.0")
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  VIEW 1 — OBSERVABILITY DASHBOARD
-# ══════════════════════════════════════════════════════════════════════════════
-if "Observability" in menu:
-    st.markdown("""
-    <div class="dg-page-header">
-        <h1>📊 Pipeline Observability Command Center</h1>
-        <p>Live health metrics, SLA compliance tracking, and execution telemetry across all data warehouse ingestion pipelines.</p>
-    </div>
-    """, unsafe_allow_html=True)
+# ═════════════════════════════════════════════════════════════════════════════
+#  PAGE 1 — OVERVIEW DASHBOARD
+# ═════════════════════════════════════════════════════════════════════════════
+if "Overview" in page:
 
-    pipelines     = repo.get_all_pipelines()
+    # Header
+    st.title("📊 Pipeline Observability Dashboard")
+    st.caption("Real-time SLA compliance, pipeline health scores, and execution telemetry across all data warehouse ingestion pipelines.")
+    st.divider()
+
+    # Pull data
+    pipelines      = repo.get_all_pipelines()
     open_incidents = repo.get_all_incidents(status="OPEN")
-    recent_runs   = repo.get_recent_runs(limit=50)
-    audit_check   = audit_service.verify_integrity()
+    recent_runs    = repo.get_recent_runs(limit=60)
+    audit_check    = audit_service.verify_integrity()
 
-    # ── KPI Row ───────────────────────────────────────────────────────────────
-    k1, k2, k3, k4 = st.columns(4)
-    with k1:
-        st.metric("🗂️ Monitored Pipelines", len(pipelines), "Active Catalogs")
-    with k2:
-        st.metric("⚡ Total Runs", len(recent_runs), "Historical Batches")
-    with k3:
-        delta = "✅ All Healthy" if len(open_incidents) == 0 else f"+{len(open_incidents)} Issues"
-        st.metric("🚨 Open Incidents", len(open_incidents), delta, delta_color="inverse")
-    with k4:
-        status_text = "✅ Chain Valid" if audit_check["is_valid"] else "🔴 Tampered!"
-        st.metric("🔒 Audit Integrity", "SHA-256", status_text)
+    # ── KPI Row ──────────────────────────────────────────────────────────────
+    k1, k2, k3, k4, k5 = st.columns(5)
+    k1.metric("🗂️ Pipelines", len(pipelines),     "Monitored")
+    k2.metric("⚡ Total Runs", len(recent_runs),   "All Time")
+    k3.metric("🔥 Open Incidents", len(open_incidents),
+              "✅ Clear" if len(open_incidents) == 0 else f"⚠️ {len(open_incidents)} active",
+              delta_color="inverse")
 
-    # ── SLA Pipeline Cards ────────────────────────────────────────────────────
-    section("Pipeline Health & SLA Compliance")
+    successful = sum(1 for r in recent_runs if r.get("status") == "SUCCESS")
+    success_rate = round(successful / len(recent_runs) * 100, 1) if recent_runs else 0
+    k4.metric("✅ Success Rate", f"{success_rate}%", f"{successful}/{len(recent_runs)} runs")
+    k5.metric("🔒 Audit Chain", "SHA-256",
+              "✅ Verified" if audit_check["is_valid"] else "🔴 Tampered")
+
+    st.divider()
+
+    # ── Pipeline SLA Cards (native st.container + progress) ──────────────────
+    st.subheader("⚡ Pipeline Health & SLA Compliance")
 
     sla_data = []
-    sla_cols = st.columns(len(pipelines))
-    for idx, p in enumerate(pipelines):
+    p_cols = st.columns(len(pipelines))
+    for i, p in enumerate(pipelines):
         rpt = sla_monitor.get_pipeline_compliance(p["id"])
         sla_data.append({
-            "Pipeline": p["name"],
-            "Target SLA (s)": p["sla_seconds"],
-            "Avg Duration (s)": rpt.average_duration_seconds,
-            "P95 Latency (s)": rpt.p95_duration_seconds,
-            "Compliance %": rpt.compliance_percentage,
-            "Grade": rpt.health_grade,
+            "Pipeline": p["name"].replace("_", " ").title(),
+            "Avg (s)":   rpt.average_duration_seconds,
+            "P95 (s)":   rpt.p95_duration_seconds,
+            "SLA (s)":   p["sla_seconds"],
+            "Compliance": rpt.compliance_percentage,
         })
-        with sla_cols[idx]:
-            good    = rpt.health_grade in ("A", "B")
-            clr     = "#34d399" if good else "#f87171"
-            bdg     = "green" if good else "red"
-            border  = "rgba(52,211,153,0.3)" if good else "rgba(248,113,113,0.3)"
-            glow    = "rgba(52,211,153,0.15)" if good else "rgba(248,113,113,0.15)"
-            st.markdown(f"""
-            <div class="dg-pipeline-card" style="border-color:{border};box-shadow:0 4px 24px {glow};">
-                <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;">
-                    <div class="dg-pipeline-tag">{p['source_type']} pipeline</div>
-                    <span class="badge badge-{bdg}">Grade {rpt.health_grade}</span>
-                </div>
-                <div class="dg-pipeline-name">{p['name']}</div>
-                <div class="dg-pipeline-sla">SLA Budget: <b style="color:#e2e8f0;">{p['sla_seconds']}s</b></div>
-                <div style="display:flex;align-items:baseline;gap:6px;margin-top:8px;">
-                    <span class="dg-compliance-num" style="color:{clr};">{rpt.compliance_percentage}%</span>
-                    <span class="dg-compliance-label">compliance</span>
-                </div>
-                <div style="margin-top:10px;font-size:12px;color:#64748b;">
-                    Avg <b style="color:#94a3b8;">{rpt.average_duration_seconds}s</b> &nbsp;·&nbsp;
-                    P95 <b style="color:#94a3b8;">{rpt.p95_duration_seconds}s</b>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
+        with p_cols[i]:
+            with st.container(border=True):
+                g_icon = grade_color(rpt.health_grade)
+                st.markdown(f"**{p['name'].replace('_',' ').title()}**")
+                st.caption(f"{p['source_type'].upper()} · SLA {p['sla_seconds']}s")
+                st.metric(
+                    f"{g_icon} Grade {rpt.health_grade}",
+                    f"{rpt.compliance_percentage}%",
+                    f"P95: {rpt.p95_duration_seconds}s",
+                    delta_color="normal" if rpt.health_grade in ("A","B") else "inverse",
+                )
+                score = int(rpt.compliance_percentage)
+                st.progress(min(score, 100) / 100)
 
-    # ── SLA Chart ─────────────────────────────────────────────────────────────
-    section("Latency vs SLA Budget")
-    df_sla = pd.DataFrame(sla_data)
-    fig_sla = go.Figure()
-    fig_sla.add_trace(go.Bar(
-        name="Avg Duration (s)", x=df_sla["Pipeline"], y=df_sla["Avg Duration (s)"],
-        marker=dict(color="#22d3ee", opacity=0.85),
-    ))
-    fig_sla.add_trace(go.Bar(
-        name="P95 Latency (s)", x=df_sla["Pipeline"], y=df_sla["P95 Latency (s)"],
-        marker=dict(color="#818cf8", opacity=0.85),
-    ))
-    fig_sla.add_trace(go.Scatter(
-        name="SLA Budget (s)", x=df_sla["Pipeline"], y=df_sla["Target SLA (s)"],
-        mode="lines+markers",
-        line=dict(color="#f87171", width=2.5, dash="dash"),
-        marker=dict(size=8, color="#f87171"),
-    ))
-    fig_sla.update_layout(barmode="group")
-    chart_theme(fig_sla, 360)
-    st.plotly_chart(fig_sla, use_container_width=True)
+    st.divider()
 
-    # ── Run Feed ──────────────────────────────────────────────────────────────
-    section("Recent Pipeline Execution Runs")
-    if recent_runs:
-        df_runs = pd.DataFrame(recent_runs)[[
-            "run_id", "pipeline_name", "status", "started_at",
-            "duration_seconds", "row_count", "error_message",
-        ]]
-        st.dataframe(df_runs, use_container_width=True, hide_index=True)
-    else:
-        st.info("No runs yet. Head to **Simulator Lab** to trigger test runs!")
+    # ── Two-column charts ─────────────────────────────────────────────────────
+    chart_left, chart_right = st.columns([3, 2], gap="medium")
 
+    with chart_left:
+        df_sla = pd.DataFrame(sla_data)
+        fig_bar = go.Figure()
+        fig_bar.add_trace(go.Bar(
+            name="Avg Duration", x=df_sla["Pipeline"], y=df_sla["Avg (s)"],
+            marker_color="#00C9FF", marker_opacity=0.85,
+        ))
+        fig_bar.add_trace(go.Bar(
+            name="P95 Latency", x=df_sla["Pipeline"], y=df_sla["P95 (s)"],
+            marker_color="#7C3AED", marker_opacity=0.85,
+        ))
+        fig_bar.add_trace(go.Scatter(
+            name="SLA Budget", x=df_sla["Pipeline"], y=df_sla["SLA (s)"],
+            mode="lines+markers",
+            line=dict(color="#F43F5E", width=2.5, dash="dot"),
+            marker=dict(size=8),
+        ))
+        fig_bar.update_layout(barmode="group")
+        styled_chart(fig_bar, 340, "⏱️ Latency vs SLA Budget")
+        st.plotly_chart(fig_bar, use_container_width=True)
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  VIEW 2 — PIPELINE SIMULATOR & FAULT LAB
-# ══════════════════════════════════════════════════════════════════════════════
-elif "Simulator" in menu:
-    st.markdown("""
-    <div class="dg-page-header">
-        <h1>🧪 Pipeline Simulator & Chaos Fault Lab</h1>
-        <p>Simulate production data batches and inject controlled failures to validate DataGuard's detection, root-cause analysis, and self-healing recovery capabilities.</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-    col_cfg, col_out = st.columns([1, 1], gap="large")
-
-    with col_cfg:
-        section("1 · Configure Pipeline Run")
-        selected_pipeline_id = st.selectbox(
-            "Target Pipeline",
-            ["crm_customers_etl", "billing_transactions_sync"],
-            format_func=lambda x: "🗄️ CRM Customer Profiles ETL" if x == "crm_customers_etl" else "💳 Billing Transactions Sync",
-        )
-        selected_fault = st.selectbox(
-            "Fault Injection Mode",
-            [
-                "None — Clean Healthy Run",
-                "NULL_SPIKE — 35% Missing Values",
-                "SCHEMA_MISMATCH — API Breaking Column Rename",
-                "ANOMALY_VALUES — Negative Balances & Outliers",
-                "SLA_BREACH — Database Lock / Latency Hang",
-                "VOLUME_DROP — Premature Connection Drop (5 rows)",
-            ],
-        )
-        fault_key = None
-        for fk in ["NULL_SPIKE", "SCHEMA_MISMATCH", "ANOMALY_VALUES", "SLA_BREACH", "VOLUME_DROP"]:
-            if fk in selected_fault:
-                fault_key = fk
-                break
-
-        if not current_user.can_trigger_pipeline:
-            st.error("⛔ Viewers cannot trigger pipeline runs. Switch to Admin or Engineer.")
-            st.button("🚀 Trigger Pipeline Run", disabled=True)
-            trigger_button = False
+    with chart_right:
+        # Run status donut
+        if recent_runs:
+            status_counts = pd.Series([r["status"] for r in recent_runs]).value_counts()
+            color_map = {"SUCCESS": "#10B981", "FAILED": "#F43F5E", "RUNNING": "#F59E0B"}
+            colors = [color_map.get(s, "#64748B") for s in status_counts.index]
+            fig_donut = go.Figure(go.Pie(
+                labels=status_counts.index,
+                values=status_counts.values,
+                hole=0.62,
+                marker=dict(colors=colors, line=dict(color="#0A0F1E", width=3)),
+                textinfo="percent",
+                textfont=dict(size=12),
+                hovertemplate="%{label}: %{value} runs<extra></extra>",
+            ))
+            fig_donut.add_annotation(
+                text=f"<b>{len(recent_runs)}</b><br><span style='font-size:11px'>Runs</span>",
+                showarrow=False, font=dict(size=16, color="#E2E8F0"), x=0.5, y=0.5,
+            )
+            styled_chart(fig_donut, 340, "🍩 Run Status Distribution")
+            st.plotly_chart(fig_donut, use_container_width=True)
         else:
-            trigger_button = st.button("🚀 Trigger Pipeline Run", type="primary")
+            st.info("No run data yet.")
 
-    with col_out:
-        section("2 · Real-Time Telemetry & Diagnosis")
+    # ── Recent Runs Table ─────────────────────────────────────────────────────
+    st.subheader("📜 Recent Execution Runs")
+    if recent_runs:
+        df_runs = pd.DataFrame(recent_runs)
+        display_cols = [c for c in ["run_id","pipeline_name","status","started_at","duration_seconds","row_count","error_message"] if c in df_runs.columns]
+        df_runs = df_runs[display_cols].copy()
+        df_runs.insert(0, "⚡", df_runs["status"].map(status_icon))
+        st.dataframe(
+            df_runs.drop(columns=["status"]),
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "⚡":               st.column_config.TextColumn("", width="small"),
+                "run_id":           st.column_config.TextColumn("Run ID"),
+                "pipeline_name":    st.column_config.TextColumn("Pipeline"),
+                "started_at":       st.column_config.TextColumn("Started"),
+                "duration_seconds": st.column_config.NumberColumn("Duration (s)", format="%.1f"),
+                "row_count":        st.column_config.NumberColumn("Rows"),
+                "error_message":    st.column_config.TextColumn("Error"),
+            },
+        )
+    else:
+        st.info("No runs yet — go to **Simulator Lab** to trigger your first run!")
 
-        if trigger_button:
-            with st.spinner("Executing pipeline & evaluating data contracts..."):
-                pipeline_meta = repo.get_pipeline(selected_pipeline_id)
-                run, df       = simulator.run_pipeline(pipeline_id=selected_pipeline_id, fault_type=fault_key)
-                quality_report = quality_engine.evaluate(selected_pipeline_id, df)
 
-                ref_df     = simulator.generate_crm_data(250) if selected_pipeline_id == "crm_customers_etl" else simulator.generate_billing_data(250)
-                numeric_col = "account_balance" if selected_pipeline_id == "crm_customers_etl" else "amount"
-                drift_report = drift_detector.evaluate(selected_pipeline_id, ref_df, df, [numeric_col])
+# ═════════════════════════════════════════════════════════════════════════════
+#  PAGE 2 — SIMULATOR LAB
+# ═════════════════════════════════════════════════════════════════════════════
+elif "Simulator" in page:
 
+    st.title("🧪 Pipeline Simulator & Chaos Fault Lab")
+    st.caption("Inject controlled failures into your pipelines to test DataGuard's detection, root-cause analysis, and self-healing recovery.")
+    st.divider()
+
+    cfg_col, out_col = st.columns([1, 1], gap="large")
+
+    with cfg_col:
+        st.subheader("⚙️ Configure Run")
+
+        with st.container(border=True):
+            pipeline_choice = st.selectbox(
+                "🗄️ Target Pipeline",
+                ["crm_customers_etl", "billing_transactions_sync"],
+                format_func=lambda x: "CRM Customer Profiles ETL" if x == "crm_customers_etl" else "Billing Transactions Sync",
+            )
+
+            fault_choice = st.selectbox(
+                "💥 Fault Injection Mode",
+                [
+                    "None — Clean Healthy Run",
+                    "NULL_SPIKE — 35 % Missing Values",
+                    "SCHEMA_MISMATCH — API Breaking Column Rename",
+                    "ANOMALY_VALUES — Negative Balances & Outliers",
+                    "SLA_BREACH — Latency / Lock Hang",
+                    "VOLUME_DROP — Premature Drop (5 rows)",
+                ],
+            )
+
+            fault_key = None
+            for fk in ["NULL_SPIKE","SCHEMA_MISMATCH","ANOMALY_VALUES","SLA_BREACH","VOLUME_DROP"]:
+                if fk in fault_choice:
+                    fault_key = fk
+                    break
+
+            # Fault info card
+            fault_info = {
+                None:              ("✅", "Clean run — no faults injected."),
+                "NULL_SPIKE":      ("🕳️", "35 % of key fields will be set to NULL, triggering data quality alerts."),
+                "SCHEMA_MISMATCH": ("🔀", "A column will be renamed, breaking downstream schema contracts."),
+                "ANOMALY_VALUES":  ("📉", "Extreme outliers and negative values injected into numeric fields."),
+                "SLA_BREACH":      ("⏰", "Pipeline runtime will exceed the configured SLA budget."),
+                "VOLUME_DROP":     ("📦", "Output truncated to 5 rows, triggering volume anomaly detection."),
+            }
+            icon, desc = fault_info.get(fault_key, ("ℹ️", ""))
+            st.info(f"{icon} **{fault_key or 'No Fault'}** — {desc}")
+
+            if not current_user.can_trigger_pipeline:
+                st.error("⛔ Viewer role cannot trigger runs. Switch to Admin or Engineer.")
+                trigger = st.button("🚀 Trigger Pipeline Run", disabled=True)
+                trigger = False
+            else:
+                trigger = st.button("🚀 Trigger Pipeline Run", type="primary", use_container_width=True)
+
+    with out_col:
+        st.subheader("📡 Real-Time Telemetry")
+
+        if trigger:
+            with st.status("⚡ Executing pipeline...", expanded=True) as exec_status:
+                st.write("🔄 Loading pipeline metadata...")
+                pipeline_meta = repo.get_pipeline(pipeline_choice)
+
+                st.write("⚙️ Generating data batch with fault injection...")
+                run, df = simulator.run_pipeline(pipeline_id=pipeline_choice, fault_type=fault_key)
+
+                st.write("🔍 Evaluating data contracts & quality rules...")
+                quality_report = quality_engine.evaluate(pipeline_choice, df)
+
+                st.write("📊 Computing statistical drift...")
+                ref_df = simulator.generate_crm_data(250) if pipeline_choice == "crm_customers_etl" else simulator.generate_billing_data(250)
+                num_col = "account_balance" if pipeline_choice == "crm_customers_etl" else "amount"
+                drift_report = drift_detector.evaluate(pipeline_choice, ref_df, df, [num_col])
+
+                st.write("🧠 Running Root Cause Analysis (RCA)...")
                 diagnosis = rca_engine.diagnose(
-                    pipeline_id=selected_pipeline_id,
+                    pipeline_id=pipeline_choice,
                     sla_seconds=pipeline_meta["sla_seconds"],
                     duration_seconds=run.duration_seconds,
                     row_count=run.row_count,
                     quality_report=quality_report,
                     drift_report=drift_report,
                 )
-                impact_report = impact_analyzer.analyze_impact(selected_pipeline_id)
-                run_status    = "FAILED" if diagnosis else "SUCCESS"
+                impact_report = impact_analyzer.analyze_impact(pipeline_choice)
+                run_status = "FAILED" if diagnosis else "SUCCESS"
 
+                st.write("💾 Persisting run record to database...")
                 repo.update_run(
                     run_id=run.run_id,
                     status=run_status,
@@ -704,409 +424,487 @@ elif "Simulator" in menu:
                 )
 
                 if diagnosis:
+                    st.write("🚨 Creating incident & recovery plan...")
                     incident = incident_manager.create_incident(
                         run_id=run.run_id,
-                        pipeline_id=selected_pipeline_id,
+                        pipeline_id=pipeline_choice,
                         diagnosis=diagnosis,
                         impact_report=impact_report,
                     )
                     plan = recommender.generate_plan(
                         incident_type=diagnosis.incident_type,
-                        pipeline_id=selected_pipeline_id,
+                        pipeline_id=pipeline_choice,
                         corrupted_indices=quality_report.corrupted_indices,
                         raw_data_path=run.raw_data_path,
                     )
-                    workflow.submit_recovery_request(incident.incident_code, selected_pipeline_id, plan)
+                    workflow.submit_recovery_request(incident.incident_code, pipeline_choice, plan)
 
-            if run_status == "SUCCESS":
-                st.success(f"✅ Pipeline executed cleanly! Run ID: `{run.run_id}`")
-                m1, m2 = st.columns(2)
-                m1.metric("Quality Score", f"{quality_report.quality_score}%", "100% Passed")
-                m2.metric("Rows Processed", run.row_count, "No Issues")
-            else:
-                sev_color = {"P1": "🔴", "P2": "🟠", "P3": "🟡"}.get(diagnosis.severity, "⚪")
-                st.error(f"{sev_color} Failure: **{diagnosis.incident_type}** (Severity: {diagnosis.severity})")
-                st.warning(f"**Root Cause:** {diagnosis.root_cause_summary}")
-                st.info(f"**Blast Radius:** {impact_report.impact_summary}")
-                st.markdown(
-                    f'📋 Incident <span class="mono">{incident.incident_code}</span> queued in '
-                    f'**Incidents & Recovery** tab.',
-                    unsafe_allow_html=True,
+                exec_status.update(
+                    label="✅ Pipeline Complete" if run_status == "SUCCESS" else "❌ Failure Detected",
+                    state="complete" if run_status == "SUCCESS" else "error",
                 )
 
-            section("Data Sample Preview (First 5 Rows)")
-            st.dataframe(df.head(), use_container_width=True)
+            # ── Results ───────────────────────────────────────────────────────
+            st.divider()
+            if run_status == "SUCCESS":
+                st.success(f"✅ **Pipeline ran cleanly!** Run ID: `{run.run_id}`")
+                r1, r2, r3 = st.columns(3)
+                r1.metric("Quality Score",   f"{quality_report.quality_score}%", "All Checks Passed")
+                r2.metric("Rows Processed",  run.row_count,                     "No Issues")
+                r3.metric("Duration",         f"{run.duration_seconds}s",        f"SLA: {pipeline_meta['sla_seconds']}s")
+            else:
+                sev_icon = severity_color(diagnosis.severity)
+                st.error(f"{sev_icon} **{diagnosis.incident_type}** detected — Severity **{diagnosis.severity}**")
+
+                with st.container(border=True):
+                    c1, c2 = st.columns(2)
+                    c1.metric("Quality Score",    f"{quality_report.quality_score}%", delta_color="inverse")
+                    c2.metric("Severity",          diagnosis.severity)
+                    st.markdown(f"**🧠 Root Cause:**  {diagnosis.root_cause_summary}")
+                    st.markdown(f"**💥 Blast Radius:** {impact_report.impact_summary}")
+                    st.markdown(f"**📋 Incident:** `{incident.incident_code}` → go to **Incidents & Recovery**")
+
+            # ── Data Preview ──────────────────────────────────────────────────
+            with st.expander("🔎 Data Sample Preview (first 10 rows)", expanded=False):
+                st.dataframe(df.head(10), use_container_width=True, hide_index=True)
+
+            # ── Quality Radar ─────────────────────────────────────────────────
+            with st.expander("📊 Quality Metrics Breakdown", expanded=True):
+                qd = quality_report.to_dict()
+                if "checks" in qd:
+                    checks = qd["checks"]
+                    cats   = list(checks.keys())
+                    vals   = [100 if v else 0 for v in checks.values()]
+                    fig_r  = go.Figure(go.Scatterpolar(
+                        r=vals + [vals[0]], theta=cats + [cats[0]],
+                        fill="toself",
+                        line=dict(color="#00C9FF", width=2),
+                        fillcolor="rgba(0,201,255,0.12)",
+                    ))
+                    fig_r.update_layout(
+                        polar=dict(
+                            radialaxis=dict(visible=True, range=[0,100], gridcolor="rgba(255,255,255,0.08)"),
+                            angularaxis=dict(gridcolor="rgba(255,255,255,0.08)"),
+                            bgcolor="rgba(0,0,0,0)",
+                        )
+                    )
+                    styled_chart(fig_r, 300, "Quality Check Results")
+                    st.plotly_chart(fig_r, use_container_width=True)
+                else:
+                    st.metric("Overall Quality Score", f"{quality_report.quality_score}%")
+
         else:
-            st.markdown("""
-            <div style="text-align:center;padding:60px 20px;color:#334155;">
-                <div style="font-size:48px;margin-bottom:16px;">⚗️</div>
-                <div style="font-size:15px;font-weight:600;color:#475569;">Configure & trigger a pipeline run</div>
-                <div style="font-size:13px;margin-top:6px;">Results and telemetry will appear here</div>
-            </div>
-            """, unsafe_allow_html=True)
+            with st.container(border=True):
+                st.markdown("""
+                ### 👈 Configure your run on the left
+
+                **What this lab does:**
+                - Generates a synthetic data batch from your selected pipeline
+                - Optionally injects a controlled fault to simulate real-world failures
+                - Runs the full DataGuard analysis stack:
+                  - 📋 **Data Quality Engine** — schema, null, range, category checks
+                  - 📊 **Drift Detector** — PSI + KS-Test statistical analysis
+                  - 🧠 **RCA Engine** — multi-criteria root cause diagnosis
+                  - 💥 **Impact Analyzer** — downstream DAG blast radius
+                  - 🚨 **Incident Manager** — auto-creates tickets for failures
+                  - 🛠️ **Recovery Engine** — proposes and queues remediation actions
+                """)
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  VIEW 3 — INCIDENTS & RECOVERY
-# ══════════════════════════════════════════════════════════════════════════════
-elif "Incidents" in menu:
-    st.markdown("""
-    <div class="dg-page-header">
-        <h1>🚨 Incident Triage & Approval-Gated Recovery</h1>
-        <p>Diagnose active pipeline failures, inspect downstream blast radius graphs, and authorize self-healing recovery actions with RBAC enforcement.</p>
-    </div>
-    """, unsafe_allow_html=True)
+# ═════════════════════════════════════════════════════════════════════════════
+#  PAGE 3 — INCIDENTS & RECOVERY
+# ═════════════════════════════════════════════════════════════════════════════
+elif "Incidents" in page:
+
+    st.title("🚨 Incident Triage & Self-Healing Recovery")
+    st.caption("Inspect active pipeline failures, trace downstream blast radius, and authorize RBAC-gated recovery actions.")
+    st.divider()
 
     all_incidents = repo.get_all_incidents()
 
     if not all_incidents:
-        st.markdown("""
-        <div style="text-align:center;padding:80px 20px;">
-            <div style="font-size:56px;margin-bottom:16px;">🎉</div>
-            <div style="font-size:18px;font-weight:700;color:#34d399;">All Clear — No Incidents Detected</div>
-            <div style="font-size:13px;color:#64748b;margin-top:8px;">All pipelines are running within healthy SLA bounds.</div>
-        </div>
-        """, unsafe_allow_html=True)
+        st.success("🎉 **All Clear!** No incidents detected. All pipelines are operating within healthy SLA bounds.")
+        st.balloons()
     else:
-        severity_icon = {"P1": "🔴", "P2": "🟠", "P3": "🟡", "P4": "🔵"}
-        status_badge  = {
-            "OPEN": "red", "IN_REVIEW": "amber",
-            "RECOVERED": "green", "CLOSED": "indigo",
-        }
+        # ── Summary row ───────────────────────────────────────────────────────
+        status_counts = {}
+        severity_counts = {}
+        for inc in all_incidents:
+            status_counts[inc["status"]] = status_counts.get(inc["status"], 0) + 1
+            severity_counts[inc["severity"]] = severity_counts.get(inc["severity"], 0) + 1
 
-        incident_options = {
-            f"{severity_icon.get(inc['severity'],'⚪')} {inc['incident_code']} — {inc['pipeline_name']} [{inc['status']}]": inc
-            for inc in all_incidents
-        }
-        selected_label = st.selectbox("Select Incident to Triage", list(incident_options.keys()))
-        selected_inc   = incident_options[selected_label]
+        s1, s2, s3, s4 = st.columns(4)
+        s1.metric("🔥 Open",       status_counts.get("OPEN", 0))
+        s2.metric("🔍 In Review",  status_counts.get("IN_REVIEW", 0))
+        s3.metric("✅ Recovered",  status_counts.get("RECOVERED", 0))
+        s4.metric("🔒 Closed",     status_counts.get("CLOSED", 0))
+        st.divider()
 
-        st.markdown("<br>", unsafe_allow_html=True)
+        # ── Incident selector ─────────────────────────────────────────────────
+        inc_options = {
+            f"{severity_color(i['severity'])} {i['incident_code']}  ·  {i['pipeline_id']}  [{i['status']}]": i
+            for i in all_incidents
+        }
+        chosen_label = st.selectbox("🔎 Select Incident", list(inc_options.keys()))
+        inc = inc_options[chosen_label]
+
+        st.divider()
         left, right = st.columns([1, 1], gap="large")
 
         # ── LEFT: Details + DAG ───────────────────────────────────────────────
         with left:
-            section("Incident Details")
-            sbdg = status_badge.get(selected_inc["status"], "cyan")
-            st.markdown(f"""
-            <div class="dg-kpi" style="--accent:#818cf8;">
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-                    <span style="font-size:18px;font-weight:800;color:#e2e8f0;">{selected_inc['incident_code']}</span>
-                    {badge(selected_inc['status'], sbdg)}
-                </div>
-                <div class="dg-stat-row">
-                    <div class="dg-stat"><div class="dg-stat-k">Pipeline</div><div class="dg-stat-v" style="font-size:12px;">{selected_inc['pipeline_id']}</div></div>
-                    <div class="dg-stat"><div class="dg-stat-k">Severity</div><div class="dg-stat-v">{selected_inc['severity']}</div></div>
-                    <div class="dg-stat"><div class="dg-stat-k">Type</div><div class="dg-stat-v" style="font-size:11px;">{selected_inc['incident_type']}</div></div>
-                </div>
-                <div style="margin-top:12px;font-size:13px;color:#94a3b8;line-height:1.6;">
-                    <b style="color:#cbd5e1;">Root Cause:</b> {selected_inc['root_cause_summary']}
-                </div>
-                <div style="margin-top:8px;font-size:12px;color:#64748b;">
-                    Assigned to: <span class="mono">{selected_inc['assigned_to']}</span>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
+            st.subheader(f"📋 {inc['incident_code']}")
 
-            section("Downstream DAG Blast Radius")
-            impact = impact_analyzer.analyze_impact(selected_inc["pipeline_id"])
-            st.info(impact.impact_summary)
+            with st.container(border=True):
+                d1, d2 = st.columns(2)
+                d1.metric("Severity",  inc["severity"])
+                d2.metric("Status",    f"{status_icon(inc['status'])} {inc['status']}")
+
+                st.markdown(f"**Pipeline:** `{inc['pipeline_id']}`")
+                st.markdown(f"**Failure Type:** `{inc['incident_type']}`")
+                st.markdown(f"**Assigned To:** `{inc['assigned_to']}`")
+                st.info(f"🧠 **Root Cause:** {inc['root_cause_summary']}")
+
+            # DAG chart
+            st.subheader("🌐 Blast Radius — Downstream DAG")
+            impact = impact_analyzer.analyze_impact(inc["pipeline_id"])
+            st.caption(impact.impact_summary)
 
             nodes  = impact.graph_nodes
-            x_pos  = [0 if n["id"] == selected_inc["pipeline_id"] else 2 for n in nodes]
+            x_pos  = [0.2 if n["id"] == inc["pipeline_id"] else 0.8 for n in nodes]
             y_pos  = list(range(len(nodes)))
-            colors = ["#f87171" if n["status"] == "FAILED" else "#fbbf24" for n in nodes]
+            colors = ["#F43F5E" if n["status"] == "FAILED" else "#F59E0B" for n in nodes]
+            labels = [n["label"] for n in nodes]
 
             fig_dag = go.Figure()
+            # Draw edges from source to downstream nodes
+            for idx, n in enumerate(nodes):
+                if n["id"] != inc["pipeline_id"]:
+                    src_idx = next((j for j, m in enumerate(nodes) if m["id"] == inc["pipeline_id"]), 0)
+                    fig_dag.add_trace(go.Scatter(
+                        x=[x_pos[src_idx], x_pos[idx]], y=[y_pos[src_idx], y_pos[idx]],
+                        mode="lines",
+                        line=dict(color="rgba(248,113,113,0.3)", width=2, dash="dot"),
+                        showlegend=False,
+                    ))
             fig_dag.add_trace(go.Scatter(
                 x=x_pos, y=y_pos,
                 mode="markers+text",
-                text=[n["label"] for n in nodes],
-                textposition="bottom center",
-                textfont=dict(size=11, color="#94a3b8"),
-                marker=dict(size=36, color=colors,
-                            line=dict(width=2, color="rgba(255,255,255,0.15)"),
-                            symbol="circle"),
-                hoverinfo="text",
+                text=labels,
+                textposition="middle right",
+                textfont=dict(size=11, color="#94A3B8"),
+                marker=dict(size=28, color=colors,
+                            line=dict(color="rgba(255,255,255,0.2)", width=2)),
+                showlegend=False,
+                hovertemplate="%{text}<extra></extra>",
             ))
             fig_dag.update_layout(
-                showlegend=False,
-                xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                xaxis=dict(showgrid=False, zeroline=False, showticklabels=False, range=[-0.1, 1.5]),
                 yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
             )
-            chart_theme(fig_dag, 260)
+            styled_chart(fig_dag, 220)
             st.plotly_chart(fig_dag, use_container_width=True)
 
         # ── RIGHT: Recovery ───────────────────────────────────────────────────
         with right:
-            section("Approval-Gated Self-Healing Recovery")
-            recovery_actions = repo.get_recovery_actions_for_incident(selected_inc["incident_code"])
+            st.subheader("🛠️ Recovery Actions")
+            actions = repo.get_recovery_actions_for_incident(inc["incident_code"])
 
-            if not recovery_actions:
-                st.markdown("""
-                <div style="text-align:center;padding:40px 20px;color:#475569;">
-                    <div style="font-size:36px;">📭</div>
-                    <div style="font-size:14px;margin-top:10px;">No recovery action proposed yet.</div>
-                </div>
-                """, unsafe_allow_html=True)
+            if not actions:
+                st.info("📭 No recovery action has been proposed for this incident yet.")
+                st.caption("Run the pipeline in **Simulator Lab** to auto-generate a recovery plan.")
             else:
-                action     = recovery_actions[0]
-                action_id  = action["id"]
+                action        = actions[0]
+                action_id     = action["id"]
                 action_status = action["status"]
 
-                st.markdown(f"""
-                <div class="dg-kpi" style="--accent:#22d3ee;">
-                    <div class="dg-stat-row">
-                        <div class="dg-stat"><div class="dg-stat-k">Action ID</div><div class="dg-stat-v">#{action_id}</div></div>
-                        <div class="dg-stat"><div class="dg-stat-k">Type</div><div class="dg-stat-v" style="font-size:11px;">{action['action_type']}</div></div>
-                        <div class="dg-stat"><div class="dg-stat-k">Status</div><div class="dg-stat-v" style="font-size:12px;">{action_status}</div></div>
-                    </div>
-                    <div style="margin-top:10px;font-size:12px;color:#64748b;">
-                        Requested by: <span class="mono">{action['requested_by']}</span>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
+                with st.container(border=True):
+                    a1, a2 = st.columns(2)
+                    a1.metric("Action ID",   f"#{action_id}")
+                    a2.metric("Status",      action_status)
+                    st.markdown(f"**Type:** `{action['action_type']}`")
+                    st.markdown(f"**Requested By:** `{action['requested_by']}`")
+
+                st.divider()
 
                 if action_status == "PENDING_APPROVAL":
-                    st.warning("⚠️ This action requires human approval before execution.")
+                    st.warning("⚠️ This action is awaiting human approval before it can execute.")
+
                     if not current_user.can_approve_recovery:
-                        st.error("⛔ Viewers cannot approve recovery. Switch to Admin or Engineer.")
-                        st.button("✅ Authorize & Execute Recovery", disabled=True)
+                        st.error("⛔ Your role (**Viewer**) cannot approve recovery actions.")
+                        st.button("✅ Authorize & Execute", disabled=True, use_container_width=True)
                     else:
-                        if st.button("✅ Authorize & Execute Recovery", type="primary"):
-                            with st.spinner("Authorizing and executing recovery operation..."):
+                        st.markdown(f"**Approver:** `{current_user.username}` ({current_user.role})")
+                        if st.button("✅ Authorize & Execute Recovery", type="primary", use_container_width=True):
+                            with st.status("⚡ Executing recovery...", expanded=True) as rec_status:
+                                st.write("✅ Approval recorded...")
                                 workflow.approve_recovery(action_id, approved_by=current_user.username, user_role=current_user.role)
+                                st.write("🛠️ Executing remediation action...")
                                 success, exec_log, recovered_df = executor.execute(action_id)
                                 if success and recovered_df is not None:
+                                    st.write("🔍 Verifying recovered data quality...")
                                     is_verified, v_rep = verifier.verify(
                                         action_id=action_id,
-                                        pipeline_id=selected_inc["pipeline_id"],
+                                        pipeline_id=inc["pipeline_id"],
                                         recovered_df=recovered_df,
                                         execution_log=exec_log,
                                         actor=current_user.username,
                                     )
                                     if is_verified:
-                                        st.success(f"🎉 Recovery Verified! Quality Score: {v_rep.quality_score}%")
+                                        rec_status.update(label="✅ Recovery Verified!", state="complete")
+                                        st.success(f"🎉 Recovery complete! Quality: **{v_rep.quality_score}%**")
+                                        st.metric("Post-Recovery Quality", f"{v_rep.quality_score}%", "Verified Healthy")
+                                        st.progress(v_rep.quality_score / 100)
                                         st.rerun()
                                     else:
-                                        st.error(f"❌ Verification Failed. Quality Score: {v_rep.quality_score}%")
+                                        rec_status.update(label="❌ Verification Failed", state="error")
+                                        st.error(f"Quality too low: {v_rep.quality_score}%")
                                 else:
-                                    st.error(f"Execution Error: {exec_log}")
+                                    rec_status.update(label="❌ Execution Failed", state="error")
+                                    st.error(f"Error: {exec_log}")
 
                 elif action_status in ("COMPLETED", "APPROVED"):
-                    st.success("🛡️ Recovery executed and verified!")
-                    st.markdown(f"""
-                    <div style="font-size:13px;color:#94a3b8;line-height:2;">
-                        <b>Approved by:</b> <span class="mono">{action['approved_by']}</span>
-                        at <span class="mono">{action['approved_at']}</span><br>
-                        <b>Execution Log:</b> {action['execution_log']}<br>
-                        <b>Verification:</b> {'✅ Healthy' if action['is_verified'] else '❌ Unverified'}
-                    </div>
-                    """, unsafe_allow_html=True)
+                    st.success("🛡️ Recovery has been executed and verified!")
+                    with st.container(border=True):
+                        st.markdown(f"**Approved By:** `{action['approved_by']}`")
+                        st.markdown(f"**Approved At:** `{action['approved_at']}`")
+                        st.markdown(f"**Verification:** {'✅ Verified Healthy' if action['is_verified'] else '❌ Unverified'}")
+                        with st.expander("📋 Execution Log"):
+                            st.code(action["execution_log"])
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  VIEW 4 — DRIFT & ANOMALIES
-# ══════════════════════════════════════════════════════════════════════════════
-elif "Drift" in menu:
-    st.markdown("""
-    <div class="dg-page-header">
-        <h1>📈 Statistical Drift & ML Anomaly Detection</h1>
-        <p>Detect distribution shifts using Population Stability Index (PSI), Kolmogorov-Smirnov test, and Isolation Forest ML anomaly detection.</p>
-    </div>
-    """, unsafe_allow_html=True)
+# ═════════════════════════════════════════════════════════════════════════════
+#  PAGE 4 — DRIFT EXPLORER
+# ═════════════════════════════════════════════════════════════════════════════
+elif "Drift" in page:
 
-    left_d, right_d = st.columns([1, 1], gap="large")
+    st.title("📈 Statistical Drift & ML Anomaly Explorer")
+    st.caption("Detect distribution shifts using PSI, Kolmogorov-Smirnov test, and Isolation Forest anomaly detection.")
+    st.divider()
 
-    with left_d:
-        section("Simulation Controls")
+    # Controls row
+    ctrl1, ctrl2, ctrl3 = st.columns([2, 2, 1])
+    with ctrl1:
         drift_pipeline = st.selectbox(
-            "Pipeline",
+            "🗄️ Pipeline",
             ["crm_customers_etl", "billing_transactions_sync"],
             format_func=lambda x: "CRM Customer Profiles ETL" if x == "crm_customers_etl" else "Billing Transactions Sync",
         )
-        shift_multiplier = st.slider(
-            "Distribution Shift Multiplier",
-            1.0, 8.0, 2.5, 0.5,
-            help="1.0 = Baseline · 3.0+ = Moderate Drift · 6.0+ = Extreme Drift",
-        )
-        st.markdown(f"""
-        <div style="font-size:12px;color:#64748b;padding:8px 12px;background:rgba(0,0,0,0.2);
-            border-radius:8px;border-left:3px solid #22d3ee;margin-top:8px;">
-            🔍 Simulating a <b style="color:#e2e8f0;">{shift_multiplier}×</b> shift in
-            <span class="mono">{'account_balance' if drift_pipeline == 'crm_customers_etl' else 'amount'}</span>
-            distribution.
-        </div>
-        """, unsafe_allow_html=True)
+    with ctrl2:
+        shift = st.slider("📉 Shift Multiplier", 1.0, 8.0, 2.5, 0.25,
+                          help="1.0 = Baseline · 3-4 = Moderate · 6+ = Extreme Drift")
+    with ctrl3:
+        st.markdown("<br>", unsafe_allow_html=True)
+        run_drift = st.button("🔍 Analyse", type="primary", use_container_width=True)
 
+    st.divider()
+
+    # Generate data
     np.random.seed(42)
     if drift_pipeline == "crm_customers_etl":
-        ref_df     = simulator.generate_crm_data(300)
-        cur_df     = simulator.generate_crm_data(300)
-        target_col = "account_balance"
+        ref_df, cur_df, col = simulator.generate_crm_data(400), simulator.generate_crm_data(400), "account_balance"
     else:
-        ref_df     = simulator.generate_billing_data(300)
-        cur_df     = simulator.generate_billing_data(300)
-        target_col = "amount"
-    cur_df[target_col] = cur_df[target_col] * shift_multiplier
+        ref_df, cur_df, col = simulator.generate_billing_data(400), simulator.generate_billing_data(400), "amount"
+    cur_df[col] = cur_df[col] * shift
 
-    report   = drift_detector.evaluate(drift_pipeline, ref_df, cur_df, [target_col])
-    drift_res = report.column_drifts[target_col]
-    psi_val  = drift_res.psi_score
-    ks_p     = drift_res.ks_pvalue
-    sev      = drift_res.drift_severity
+    report    = drift_detector.evaluate(drift_pipeline, ref_df, cur_df, [col])
+    drift_res = report.column_drifts[col]
+    psi       = drift_res.psi_score
+    ks_p      = drift_res.ks_pvalue
+    sev       = drift_res.drift_severity
 
-    with right_d:
-        section("Statistical Diagnostics")
-        d1, d2, d3 = st.columns(3)
-        d1.metric("PSI Score", psi_val, f"Threshold >{DEFAULT_PSI_DRIFT_THRESHOLD}")
-        d2.metric("KS p-value", f"{ks_p:.4f}", "< 0.05 = Drift")
-        d3.metric("Severity", sev)
+    # ── Results KPIs ──────────────────────────────────────────────────────────
+    r1, r2, r3, r4 = st.columns(4)
+    r1.metric("📊 PSI Score",     f"{psi:.4f}",    f"Threshold >{DEFAULT_PSI_DRIFT_THRESHOLD}")
+    r2.metric("📐 KS p-value",    f"{ks_p:.4f}",   "< 0.05 = Drift Detected")
+    r3.metric("🌡️ Severity",      sev)
+    r4.metric("🔀 Shift Applied", f"{shift}×",     f"Column: {col}")
 
-        if sev == "CRITICAL":
-            st.error(f"🚨 {drift_res.message}")
-        elif sev == "MODERATE":
-            st.warning(f"⚠️ {drift_res.message}")
-        else:
-            st.success(f"✅ {drift_res.message}")
+    if sev == "CRITICAL":
+        st.error(f"🚨 {drift_res.message}")
+    elif sev == "MODERATE":
+        st.warning(f"⚠️ {drift_res.message}")
+    else:
+        st.success(f"✅ {drift_res.message}")
 
-    # ── Overlay Histogram ─────────────────────────────────────────────────────
-    section(f"Distribution Curves — Baseline vs Current · '{target_col}'")
-    fig_dist = go.Figure()
-    fig_dist.add_trace(go.Histogram(
-        x=ref_df[target_col], name="Baseline (Reference)",
-        opacity=0.65, marker_color="#22d3ee",
-        nbinsx=40,
-    ))
-    fig_dist.add_trace(go.Histogram(
-        x=cur_df[target_col], name="Current Batch",
-        opacity=0.65, marker_color="#f87171",
-        nbinsx=40,
-    ))
-    fig_dist.update_layout(barmode="overlay")
-    chart_theme(fig_dist, 380)
-    st.plotly_chart(fig_dist, use_container_width=True)
+    st.divider()
 
-    # ── PSI Gauge ─────────────────────────────────────────────────────────────
-    section("PSI Risk Gauge")
-    fig_gauge = go.Figure(go.Indicator(
-        mode="gauge+number+delta",
-        value=float(psi_val),
-        delta={"reference": float(DEFAULT_PSI_DRIFT_THRESHOLD), "valueformat": ".3f"},
-        title={"text": "Population Stability Index", "font": {"size": 14, "color": "#94a3b8"}},
-        number={"font": {"size": 32, "color": "#e2e8f0"}, "valueformat": ".3f"},
-        gauge={
-            "axis": {"range": [0, 0.5], "tickcolor": "#64748b", "tickfont": {"size": 10}},
-            "bar": {"color": "#22d3ee", "thickness": 0.25},
-            "bgcolor": "rgba(0,0,0,0)",
-            "bordercolor": "rgba(99,179,255,0.15)",
-            "steps": [
-                {"range": [0, 0.1],  "color": "rgba(52,211,153,0.15)"},
-                {"range": [0.1, 0.2],"color": "rgba(251,191,36,0.15)"},
-                {"range": [0.2, 0.5],"color": "rgba(248,113,113,0.15)"},
-            ],
-            "threshold": {"line": {"color": "#f87171","width": 2},"thickness": 0.75,"value": DEFAULT_PSI_DRIFT_THRESHOLD},
-        },
-    ))
-    fig_gauge.update_layout(paper_bgcolor="rgba(0,0,0,0)", font_color="#94a3b8", height=280, margin=dict(l=30,r=30,t=50,b=10))
-    st.plotly_chart(fig_gauge, use_container_width=True)
+    # ── Charts row ────────────────────────────────────────────────────────────
+    ch1, ch2 = st.columns([3, 2], gap="medium")
+
+    with ch1:
+        # Overlay histogram
+        fig_hist = go.Figure()
+        fig_hist.add_trace(go.Histogram(
+            x=ref_df[col], name="Baseline (Reference)",
+            nbinsx=50, marker_color="#00C9FF", opacity=0.6,
+        ))
+        fig_hist.add_trace(go.Histogram(
+            x=cur_df[col], name="Current Batch",
+            nbinsx=50, marker_color="#F43F5E", opacity=0.6,
+        ))
+        fig_hist.update_layout(barmode="overlay")
+        styled_chart(fig_hist, 360, f"📊 Distribution Overlay — '{col}'")
+        st.plotly_chart(fig_hist, use_container_width=True)
+
+    with ch2:
+        # PSI Gauge
+        gauge_color = "#10B981" if psi < 0.1 else ("#F59E0B" if psi < 0.2 else "#F43F5E")
+        fig_gauge = go.Figure(go.Indicator(
+            mode="gauge+number",
+            value=float(psi),
+            number=dict(font=dict(size=36, color="#E2E8F0"), valueformat=".4f"),
+            title=dict(text="PSI Score", font=dict(size=13, color="#94A3B8")),
+            gauge=dict(
+                axis=dict(range=[0, 0.5], tickformat=".2f", tickcolor="#64748B"),
+                bar=dict(color=gauge_color, thickness=0.3),
+                bgcolor="rgba(0,0,0,0)",
+                bordercolor="rgba(255,255,255,0.08)",
+                steps=[
+                    dict(range=[0, 0.1],  color="rgba(16,185,129,0.1)"),
+                    dict(range=[0.1, 0.2],color="rgba(245,158,11,0.1)"),
+                    dict(range=[0.2, 0.5],color="rgba(244,63,94,0.1)"),
+                ],
+                threshold=dict(
+                    line=dict(color="#F43F5E", width=2),
+                    value=DEFAULT_PSI_DRIFT_THRESHOLD,
+                    thickness=0.8,
+                ),
+            ),
+        ))
+        fig_gauge.update_layout(
+            paper_bgcolor="rgba(0,0,0,0)",
+            font_color="#94A3B8",
+            height=360,
+            margin=dict(l=30, r=30, t=50, b=20),
+        )
+        st.plotly_chart(fig_gauge, use_container_width=True)
+
+    # ── Box plots side by side ────────────────────────────────────────────────
+    with st.expander("📦 Statistical Box Plot Comparison", expanded=True):
+        df_box = pd.concat([
+            ref_df[[col]].assign(Source="Baseline"),
+            cur_df[[col]].assign(Source="Current"),
+        ])
+        fig_box = px.box(
+            df_box, x="Source", y=col, color="Source",
+            color_discrete_map={"Baseline": "#00C9FF", "Current": "#F43F5E"},
+            points="outliers",
+        )
+        styled_chart(fig_box, 300, "Distribution Spread & Outliers")
+        st.plotly_chart(fig_box, use_container_width=True)
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  VIEW 5 — AUDIT & KNOWLEDGE BASE
-# ══════════════════════════════════════════════════════════════════════════════
-elif "Audit" in menu:
-    st.markdown("""
-    <div class="dg-page-header">
-        <h1>🛡️ Cryptographic Audit Ledger & Knowledge Base</h1>
-        <p>Tamper-evident append-only audit chain secured with SHA-256 hashing, plus a searchable institutional knowledge repository of proven failure resolutions.</p>
-    </div>
-    """, unsafe_allow_html=True)
+# ═════════════════════════════════════════════════════════════════════════════
+#  PAGE 5 — AUDIT & KNOWLEDGE BASE
+# ═════════════════════════════════════════════════════════════════════════════
+elif "Audit" in page:
 
-    tab_audit, tab_kb = st.tabs(["🔒  Audit Ledger", "📚  Knowledge Base"])
+    st.title("🛡️ Audit Ledger & Knowledge Base")
+    st.caption("Tamper-evident SHA-256 hash chain audit log and searchable institutional knowledge repository.")
+    st.divider()
 
-    # ── TAB 1: Audit ──────────────────────────────────────────────────────────
+    tab_audit, tab_kb, tab_integrity = st.tabs([
+        "🔒  Audit Log",
+        "📚  Knowledge Base",
+        "🔑  Chain Integrity",
+    ])
+
+    # ── TAB 1: Audit Log ──────────────────────────────────────────────────────
     with tab_audit:
-        integrity = audit_service.verify_integrity()
-        if integrity["is_valid"]:
-            st.markdown(f"""
-            <div style="background:rgba(52,211,153,0.08);border:1px solid rgba(52,211,153,0.3);
-                border-radius:12px;padding:16px 20px;margin-bottom:20px;display:flex;align-items:center;gap:14px;">
-                <span style="font-size:28px;">✅</span>
-                <div>
-                    <div style="font-size:14px;font-weight:700;color:#34d399;">Audit Integrity Verified</div>
-                    <div style="font-size:12px;color:#64748b;margin-top:2px;">
-                        {integrity['total_checked']} records form an unbroken SHA-256 hash chain. Zero tampering detected.
-                    </div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-        else:
-            st.markdown(f"""
-            <div style="background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.35);
-                border-radius:12px;padding:16px 20px;margin-bottom:20px;display:flex;align-items:center;gap:14px;">
-                <span style="font-size:28px;">🔴</span>
-                <div>
-                    <div style="font-size:14px;font-weight:700;color:#f87171;">Tampering Detected!</div>
-                    <div style="font-size:12px;color:#64748b;margin-top:2px;">{integrity.get('reason','Unknown error')}</div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
+        st.subheader("📋 Audit Trail Explorer")
+        col_f1, col_f2 = st.columns([2, 1])
+        with col_f1:
+            actor_filter = st.text_input("🔍 Filter by Actor", placeholder="admin · simulator_engine · engineer_alice")
+        with col_f2:
+            limit_filter = st.number_input("Max Rows", min_value=10, max_value=500, value=100, step=10)
 
-        section("Audit Log Explorer")
-        filter_actor = st.text_input("Filter by Actor", placeholder="e.g. admin, simulator_engine, engineer_alice")
-        audit_records = audit_service.get_audit_trail(limit=100, actor=filter_actor or None)
+        records = audit_service.get_audit_trail(limit=int(limit_filter), actor=actor_filter or None)
 
-        if audit_records:
-            df_audit = pd.DataFrame(audit_records)[[
-                "id", "timestamp", "actor", "action", "entity_type", "entity_id", "record_hash"
-            ]]
-            st.dataframe(df_audit, use_container_width=True, hide_index=True)
-            csv = df_audit.to_csv(index=False).encode("utf-8")
-            st.download_button(
-                "📥 Export Audit Trail as CSV",
-                data=csv,
-                file_name="dataguard_audit_trail.csv",
-                mime="text/csv",
+        if records:
+            df_audit = pd.DataFrame(records)[["id","timestamp","actor","action","entity_type","entity_id","record_hash"]]
+            st.dataframe(
+                df_audit, use_container_width=True, hide_index=True,
+                column_config={
+                    "id":          st.column_config.NumberColumn("#", width="small"),
+                    "timestamp":   st.column_config.TextColumn("Timestamp"),
+                    "actor":       st.column_config.TextColumn("Actor"),
+                    "action":      st.column_config.TextColumn("Action"),
+                    "entity_type": st.column_config.TextColumn("Entity"),
+                    "entity_id":   st.column_config.TextColumn("Entity ID"),
+                    "record_hash": st.column_config.TextColumn("SHA-256 Hash"),
+                },
             )
+            csv = df_audit.to_csv(index=False).encode("utf-8")
+            st.download_button("📥 Export as CSV", data=csv,
+                               file_name="dataguard_audit.csv", mime="text/csv")
+
+            # Action distribution chart
+            with st.expander("📊 Action Distribution Chart"):
+                action_counts = df_audit["action"].value_counts().reset_index()
+                action_counts.columns = ["action", "count"]
+                fig_actions = px.bar(
+                    action_counts, x="count", y="action", orientation="h",
+                    color="count",
+                    color_continuous_scale=["#1e3a5f", "#00C9FF"],
+                )
+                styled_chart(fig_actions, 280, "Events by Action Type")
+                st.plotly_chart(fig_actions, use_container_width=True)
         else:
-            st.info("No audit logs match the current filter.")
+            st.info("No records found with the current filter.")
 
     # ── TAB 2: Knowledge Base ─────────────────────────────────────────────────
     with tab_kb:
-        section("Institutional Knowledge Base")
-        search_q  = st.text_input("🔍 Search Solutions", placeholder="e.g. schema, null, timeout, SLA, drift")
-        solutions = kb_service.search_solutions(search_q) if search_q else kb_service.get_all_solutions()
+        st.subheader("📚 Failure Resolution Knowledge Base")
+        search = st.text_input("🔍 Search Solutions", placeholder="schema · null · timeout · SLA · drift · volume")
+        solutions = kb_service.search_solutions(search) if search else kb_service.get_all_solutions()
 
         if not solutions:
-            st.info("No solutions found. Try a different keyword.")
+            st.warning("No solutions found. Try a different keyword.")
         else:
+            st.caption(f"Found **{len(solutions)}** solution(s)")
             for s in solutions:
-                times_color = "#34d399" if s["times_used"] >= 3 else "#fbbf24"
-                with st.expander(f"📌  {s['incident_type']}"):
-                    st.markdown(f"""
-                    <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;">
-                        <span class="badge badge-indigo">Applied {s['times_used']} times</span>
-                        <span class="badge badge-cyan">{s['incident_type']}</span>
-                    </div>
-                    <table style="width:100%;border-collapse:collapse;font-size:13px;">
-                        <tr>
-                            <td style="color:#64748b;padding:5px 0;width:160px;font-weight:600;">Error Pattern</td>
-                            <td><span class="mono">{s['error_pattern']}</span></td>
-                        </tr>
-                        <tr>
-                            <td style="color:#64748b;padding:5px 0;font-weight:600;">Root Cause</td>
-                            <td style="color:#94a3b8;">{s['root_cause']}</td>
-                        </tr>
-                        <tr>
-                            <td style="color:#64748b;padding:5px 0;font-weight:600;">Recommended Action</td>
-                            <td><span class="mono">{s['recommended_action']}</span></td>
-                        </tr>
-                    </table>
-                    <div style="margin-top:14px;padding:12px 14px;background:rgba(0,0,0,0.25);
-                        border-radius:8px;border-left:3px solid #818cf8;">
-                        <div style="font-size:11px;font-weight:700;text-transform:uppercase;
-                            letter-spacing:0.07em;color:#64748b;margin-bottom:6px;">Resolution Steps</div>
-                        <div style="font-size:13px;color:#94a3b8;line-height:1.7;">{s['resolution_steps']}</div>
-                    </div>
-                    """, unsafe_allow_html=True)
+                with st.expander(f"📌  {s['incident_type']}  ·  Applied {s['times_used']}× successfully"):
+                    col_a, col_b = st.columns([1, 1])
+                    with col_a:
+                        st.markdown("**Error Pattern**")
+                        st.code(s["error_pattern"], language="text")
+                        st.markdown("**Recommended Action**")
+                        st.code(s["recommended_action"], language="text")
+                    with col_b:
+                        st.markdown("**Root Cause**")
+                        st.info(s["root_cause"])
+                        st.markdown("**Resolution Steps**")
+                        st.markdown(s["resolution_steps"])
+                    st.metric("Times Successfully Applied", s["times_used"])
+                    st.progress(min(s["times_used"] / 10, 1.0))
+
+    # ── TAB 3: Chain Integrity ────────────────────────────────────────────────
+    with tab_integrity:
+        st.subheader("🔑 SHA-256 Hash Chain Integrity Verification")
+        st.caption("Every audit log entry is cryptographically chained. Any tampering breaks the chain.")
+
+        with st.spinner("Verifying hash chain..."):
+            integrity = audit_service.verify_integrity()
+
+        if integrity["is_valid"]:
+            st.success(f"✅ **CHAIN VERIFIED** — {integrity['total_checked']} records checked. Zero tampering detected.")
+            st.metric("Records Verified", integrity["total_checked"], "Unbroken Chain")
+            st.progress(1.0)
+        else:
+            st.error(f"🔴 **TAMPERING DETECTED** — {integrity.get('reason', 'Unknown error')}")
+            st.metric("Integrity Status", "COMPROMISED", delta_color="inverse")
+
+        with st.expander("ℹ️ How the Hash Chain Works"):
+            st.markdown("""
+            Each audit log record contains:
+            1. **Its own data** (action, actor, entity, timestamp)
+            2. **A SHA-256 hash** computed from its data + the previous record's hash
+
+            This creates a **tamper-evident chain** — if any record is modified:
+            - Its hash no longer matches
+            - Every subsequent record's hash also breaks
+            - The verification scan immediately detects the breach
+
+            This is the same principle used by **Bitcoin's blockchain** and **certificate transparency logs**.
+            """)

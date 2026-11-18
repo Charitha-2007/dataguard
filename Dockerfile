@@ -27,6 +27,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
 COPY config/ config/
 COPY src/ src/
 COPY tests/ tests/
+COPY .streamlit/ .streamlit/
 COPY README.md .
 
 # Create persistent data directories

@@ -17,6 +17,8 @@ htmlcov/
 *.sqlite3
 data/mock_pipeline_data/*.csv
 data/mock_pipeline_data/*.json
+data/processed/*.csv
+data/raw/*
 
 # IDE & OS files
 .vscode/

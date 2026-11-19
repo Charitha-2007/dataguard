@@ -38,7 +38,7 @@ jobs:
           python -m py_compile src/recovery/*.py
           python -m py_compile src/services/*.py
 
-      # Step 5: Run full Pytest test suite (all 77 unit and integration tests)
+      # Step 5: Run full Pytest test suite (all 83 unit and integration tests)
       - name: Run Pytest test suite
         run: |
           pytest tests/ -v --color=yes

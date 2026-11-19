@@ -171,7 +171,7 @@ CREATE TABLE IF NOT EXISTS notification_logs (
     severity TEXT NOT NULL,
     recipients_json TEXT NOT NULL,
     subject TEXT NOT NULL,
-    status TEXT NOT NULL CHECK(status IN ('SENT', 'FAILED', 'SUPPRESSED_COOLDOWN')),
+    status TEXT NOT NULL CHECK(status IN ('SENT', 'SMTP_ACCEPTED', 'MOCK_DISPATCHED', 'FAILED', 'SUPPRESSED_COOLDOWN', 'SUPPRESSED_SEVERITY')),
     error_message TEXT,
     channel TEXT NOT NULL DEFAULT 'EMAIL'
 );
@@ -344,7 +344,41 @@ def init_db() -> None:
     """Executes schema DDL and seeds initial baseline data (users, pipelines, knowledge base)."""
     with get_db() as conn:
         conn.executescript(SCHEMA_SQL)
+        _migrate_notification_logs_if_needed(conn)
         _seed_baseline_data(conn)
+
+
+def _migrate_notification_logs_if_needed(conn: sqlite3.Connection) -> None:
+    """Migrates notification_logs to expand CHECK constraint for real SMTP vs Mock statuses if needed."""
+    try:
+        # Check if table allows 'SMTP_ACCEPTED'
+        conn.execute(
+            "INSERT INTO notification_logs (id, timestamp, severity, recipients_json, subject, status) "
+            "VALUES (-999, '2000-01-01 00:00:00', 'INFO', '[]', '__migration_probe__', 'SMTP_ACCEPTED');"
+        )
+        conn.execute("DELETE FROM notification_logs WHERE id = -999;")
+    except sqlite3.IntegrityError:
+        # CHECK constraint rejected 'SMTP_ACCEPTED'; perform safe table migration
+        conn.execute("CREATE TABLE IF NOT EXISTS notification_logs_backup AS SELECT * FROM notification_logs;")
+        conn.execute("DROP TABLE notification_logs;")
+        conn.execute(
+            """CREATE TABLE notification_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+                incident_code TEXT,
+                pipeline_id TEXT,
+                severity TEXT NOT NULL,
+                recipients_json TEXT NOT NULL,
+                subject TEXT NOT NULL,
+                status TEXT NOT NULL CHECK(status IN ('SENT', 'SMTP_ACCEPTED', 'MOCK_DISPATCHED', 'FAILED', 'SUPPRESSED_COOLDOWN', 'SUPPRESSED_SEVERITY')),
+                error_message TEXT,
+                channel TEXT NOT NULL DEFAULT 'EMAIL'
+            );"""
+        )
+        conn.execute("INSERT INTO notification_logs SELECT * FROM notification_logs_backup;")
+        conn.execute("DROP TABLE notification_logs_backup;")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_notif_logs_incident ON notification_logs(incident_code);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_notif_logs_pipeline ON notification_logs(pipeline_id);")
 
 
 def _seed_baseline_data(conn: sqlite3.Connection) -> None:

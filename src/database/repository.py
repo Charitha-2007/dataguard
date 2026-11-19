@@ -659,7 +659,7 @@ class DataGuardRepository:
         with get_db() as conn:
             cursor = conn.execute(
                 """SELECT timestamp FROM notification_logs
-                   WHERE pipeline_id = ? AND status = 'SENT'
+                   WHERE pipeline_id = ? AND status IN ('SENT', 'SMTP_ACCEPTED', 'MOCK_DISPATCHED')
                    ORDER BY id DESC LIMIT 1;""",
                 (pipeline_id,),
             )

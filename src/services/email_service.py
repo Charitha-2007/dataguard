@@ -2,15 +2,20 @@
 
 Features:
 - Enterprise SMTP delivery (STARTTLS / SSL / Auth) with duplicate suppression & cooldown
-- Multipart HTML & Plain-Text responsive email templates
-- Configurable team recipients (5 team members)
+- Dedicated real SMTP connection testing & credential verification
+- Retry handling with exponential backoff for transient network errors
+- Multi-recipient dispatch (all 5 team members)
 - Severity-based threshold gating (ALL, CRITICAL_HIGH, CRITICAL_ONLY)
 - Graceful sandbox / mock mode for local testing without external internet credentials
+- Clear distinction between MOCK_DISPATCHED, SMTP_ACCEPTED, and FAILED
+- Sanitized error reporting (credentials never exposed in logs or UI)
 - Full delivery auditing into SQLite notification_logs
 """
 
 import os
 import json
+import time
+import socket
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -27,15 +32,35 @@ class EmailNotificationService:
         self.repo = repo or DataGuardRepository()
 
     def get_config(self) -> Dict[str, Any]:
-        """Loads configuration from repository with environment variable overrides."""
+        """Loads configuration with precedence: Environment Variables > Streamlit Secrets > Database."""
         cfg = self.repo.get_notification_settings()
 
-        # Allow environment variable overrides for production CI/CD & secrets
-        smtp_host = os.environ.get("DATAGUARD_SMTP_HOST", cfg.get("smtp_host", "smtp.gmail.com"))
-        smtp_port = int(os.environ.get("DATAGUARD_SMTP_PORT", cfg.get("smtp_port", 587)))
-        sender_email = os.environ.get("DATAGUARD_SENDER_EMAIL", cfg.get("sender_email", "alerts@dataguard.local"))
-        smtp_user = os.environ.get("DATAGUARD_SMTP_USER", cfg.get("smtp_username", ""))
-        smtp_pass = os.environ.get("DATAGUARD_SMTP_PASSWORD", cfg.get("smtp_password", ""))
+        # Check Streamlit secrets if running inside Streamlit
+        st_smtp = {}
+        try:
+            import streamlit as st
+            if hasattr(st, "secrets"):
+                st_smtp = st.secrets.get("smtp", {})
+        except Exception:
+            pass
+
+        smtp_host = os.environ.get("DATAGUARD_SMTP_HOST", st_smtp.get("host", cfg.get("smtp_host", "smtp.gmail.com")))
+        smtp_port = int(os.environ.get("DATAGUARD_SMTP_PORT", st_smtp.get("port", cfg.get("smtp_port", 587))))
+        sender_email = os.environ.get(
+            "DATAGUARD_SENDER_EMAIL",
+            st_smtp.get("sender_email", cfg.get("sender_email", "alerts@dataguard.local")),
+        )
+        smtp_user = os.environ.get("DATAGUARD_SMTP_USER", st_smtp.get("username", cfg.get("smtp_username", "")))
+        smtp_pass = os.environ.get("DATAGUARD_SMTP_PASSWORD", st_smtp.get("password", cfg.get("smtp_password", "")))
+
+        # Mock mode precedence: env var > secrets > database setting
+        env_mock = os.environ.get("DATAGUARD_SMTP_MOCK")
+        if env_mock is not None:
+            mock_mode = env_mock.lower() in ("true", "1", "yes")
+        elif "mock_mode" in st_smtp:
+            mock_mode = bool(st_smtp["mock_mode"])
+        else:
+            mock_mode = bool(cfg.get("mock_mode", 1))
 
         recipients_raw = cfg.get("recipients_json", "[]")
         try:
@@ -62,8 +87,21 @@ class EmailNotificationService:
             "recipients": recipients,
             "severity_threshold": cfg.get("severity_threshold", "ALL"),
             "cooldown_minutes": int(cfg.get("cooldown_minutes", 30)),
-            "mock_mode": bool(cfg.get("mock_mode", 1)),
+            "mock_mode": mock_mode,
         }
+
+    def _sanitize_error(self, error_str: str, password: Optional[str] = None) -> str:
+        """Strips credentials or secrets from error messages before persistence or display."""
+        if not error_str:
+            return ""
+        sanitized = str(error_str)
+        if password and len(password) >= 4:
+            sanitized = sanitized.replace(password, "●●●●●●●●")
+        # Also clean common env password values
+        env_pwd = os.environ.get("DATAGUARD_SMTP_PASSWORD")
+        if env_pwd and len(env_pwd) >= 4:
+            sanitized = sanitized.replace(env_pwd, "●●●●●●●●")
+        return sanitized
 
     def _should_send_for_severity(self, severity: str, threshold: str) -> bool:
         """Determines if the alert meets the configured severity filter."""
@@ -75,6 +113,92 @@ class EmailNotificationService:
         elif threshold == "CRITICAL_ONLY":
             return sev_clean in ["P1", "CRITICAL"]
         return True
+
+    def test_smtp_connection(
+        self,
+        smtp_host: Optional[str] = None,
+        smtp_port: Optional[int] = None,
+        smtp_username: Optional[str] = None,
+        smtp_password: Optional[str] = None,
+        smtp_use_tls: Optional[bool] = None,
+        smtp_use_ssl: Optional[bool] = None,
+        timeout: int = 10,
+    ) -> Dict[str, Any]:
+        """Performs a live network handshake and authentication test against the configured SMTP server."""
+        cfg = self.get_config()
+        host = smtp_host or cfg["smtp_host"]
+        port = int(smtp_port or cfg["smtp_port"])
+        user = smtp_username if smtp_username is not None else cfg["smtp_username"]
+        pwd = smtp_password if smtp_password is not None else cfg["smtp_password"]
+        use_tls = smtp_use_tls if smtp_use_tls is not None else cfg["smtp_use_tls"]
+        use_ssl = smtp_use_ssl if smtp_use_ssl is not None else cfg["smtp_use_ssl"]
+
+        if not user or not pwd:
+            return {
+                "success": False,
+                "error_type": "MISSING_CREDENTIALS",
+                "message": "SMTP Username or App Password is not configured.",
+                "hint": (
+                    "To send real emails via Gmail (smtp.gmail.com), configure: "
+                    "1) SMTP Username (your Gmail address, e.g. you@gmail.com) and "
+                    "2) A 16-character Google App Password (generate at https://myaccount.google.com/apppasswords). "
+                    "Enter these in the Settings form or export DATAGUARD_SMTP_USER and DATAGUARD_SMTP_PASSWORD."
+                ),
+            }
+
+        try:
+            if use_ssl:
+                server = smtplib.SMTP_SSL(host, port, timeout=timeout)
+            else:
+                server = smtplib.SMTP(host, port, timeout=timeout)
+
+            server.ehlo()
+            if use_tls and not use_ssl:
+                server.starttls()
+                server.ehlo()
+
+            server.login(user, pwd)
+            server.quit()
+
+            return {
+                "success": True,
+                "message": f"Successfully connected and authenticated with {host}:{port} via {'SSL' if use_ssl else 'STARTTLS'}.",
+                "host": host,
+                "port": port,
+                "user": user,
+            }
+
+        except smtplib.SMTPAuthenticationError as e:
+            err = self._sanitize_error(str(e), pwd)
+            return {
+                "success": False,
+                "error_type": "AUTHENTICATION_FAILED",
+                "message": f"SMTP Authentication failed for user '{user}': {err}",
+                "hint": (
+                    "Gmail requires a 16-character App Password when 2-Step Verification is active. "
+                    "Generate an App Password at https://myaccount.google.com/apppasswords and paste it as the SMTP Password. "
+                    "Regular Gmail passwords are rejected with '535 5.7.8 BadCredentials'."
+                ),
+            }
+        except (smtplib.SMTPConnectError, ConnectionRefusedError, socket.timeout, TimeoutError, OSError) as e:
+            err = self._sanitize_error(str(e), pwd)
+            return {
+                "success": False,
+                "error_type": "CONNECTION_FAILED",
+                "message": f"Failed to connect to SMTP server at {host}:{port}: {err}",
+                "hint": (
+                    f"Check internet connectivity and firewall rules. Ensure outbound TCP connections "
+                    f"to port {port} are permitted."
+                ),
+            }
+        except Exception as e:
+            err = self._sanitize_error(str(e), pwd)
+            return {
+                "success": False,
+                "error_type": "SMTP_ERROR",
+                "message": f"SMTP error during handshake: {err}",
+                "hint": "Verify SMTP host, port, TLS/SSL flags, and network routing.",
+            }
 
     def send_incident_alert(
         self,
@@ -116,8 +240,9 @@ class EmailNotificationService:
                 "message": f"Alert suppressed: prior notification sent within {config['cooldown_minutes']} min cooldown.",
             }
 
-        subject = f"[DataGuard ALERT] [{severity}] Pipeline Failure – {pipeline_id} ({incident_code})"
-        
+        mode_tag = " [MOCK]" if config["mock_mode"] else ""
+        subject = f"[DataGuard ALERT]{mode_tag} [{severity}] Pipeline Failure – {pipeline_id} ({incident_code})"
+
         # Build HTML & Plaintext
         html_body = self._build_incident_html(
             incident_code=incident_code,
@@ -128,9 +253,10 @@ class EmailNotificationService:
             downstream_impact=downstream_impact,
             recommended_action=recommended_action,
             dashboard_url=dashboard_url,
+            is_mock=config["mock_mode"],
         )
         plain_body = (
-            f"=== DATAGUARD INCIDENT ALERT ===\n\n"
+            f"=== DATAGUARD INCIDENT ALERT ({'MOCK/SIMULATED' if config['mock_mode'] else 'LIVE SMTP'}) ===\n\n"
             f"Severity: {severity}\n"
             f"Incident Code: {incident_code}\n"
             f"Pipeline: {pipeline_id}\n"
@@ -167,7 +293,8 @@ class EmailNotificationService:
         if not config["is_enabled"]:
             return {"status": "DISABLED", "message": "Email notifications are disabled."}
 
-        subject = f"[DataGuard ALERT] [{severity}] SLA Breach – {pipeline_id} (+{overage_percent}%)"
+        mode_tag = " [MOCK]" if config["mock_mode"] else ""
+        subject = f"[DataGuard ALERT]{mode_tag} [{severity}] SLA Breach – {pipeline_id} (+{overage_percent}%)"
         title = f"Pipeline '{pipeline_id}' latency SLA breached"
         root_cause = f"Execution took {actual_duration_seconds:.2f}s, exceeding budget of {sla_seconds}s by {overage_percent}%."
         impact = "Downstream analytics feeds and business consumers may experience stale data."
@@ -185,13 +312,14 @@ class EmailNotificationService:
         )
 
     def send_test_email(self, test_recipients: Optional[List[str]] = None) -> Dict[str, Any]:
-        """Dispatches an immediate test email to verify SMTP and team delivery."""
+        """Dispatches an immediate test email to verify SMTP configuration and team delivery."""
         config = self.get_config()
         recipients = test_recipients or config["recipients"]
 
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        subject = f"[DataGuard TEST] Operational Email Notification System Verification ({now_str})"
-        
+        mode_label = "MOCK / SIMULATED" if config["mock_mode"] else "LIVE SMTP"
+        subject = f"[DataGuard TEST] Operational Verification ({mode_label}) – {now_str}"
+
         html_body = f"""
         <!DOCTYPE html>
         <html>
@@ -216,8 +344,10 @@ class EmailNotificationService:
                             <td style="padding: 8px 0; color: #F1F5F9;">{config['smtp_host']}:{config['smtp_port']}</td>
                         </tr>
                         <tr>
-                            <td style="padding: 8px 0; color: #64748B;">Mode:</td>
-                            <td style="padding: 8px 0; color: #00C9FF; font-weight: 600;">{'Sandbox / Simulated Delivery' if config['mock_mode'] else 'Live SMTP Production'}</td>
+                            <td style="padding: 8px 0; color: #64748B;">Transport Mode:</td>
+                            <td style="padding: 8px 0; color: {'#00C9FF' if config['mock_mode'] else '#10B981'}; font-weight: 600;">
+                                {'🧪 Sandbox / Simulated Delivery (Mock)' if config['mock_mode'] else '✉️ Live SMTP Production (TLS 587)'}
+                            </td>
                         </tr>
                         <tr>
                             <td style="padding: 8px 0; color: #64748B;">Target Team:</td>
@@ -235,7 +365,7 @@ class EmailNotificationService:
         </body>
         </html>
         """
-        plain_body = f"DataGuard Test Notification - Delivery verified to {len(recipients)} recipients at {now_str}."
+        plain_body = f"DataGuard Test Notification ({mode_label}) - Delivery verified to {len(recipients)} recipients at {now_str}."
 
         return self._dispatch_email(
             subject=subject,
@@ -259,7 +389,7 @@ class EmailNotificationService:
         severity: str,
         config: Dict[str, Any],
     ) -> Dict[str, Any]:
-        """Handles physical SMTP transport or simulated sandbox delivery with error logging."""
+        """Dispatches an alert via Real SMTP (with retry) or records a simulated Mock dispatch."""
         recipients_json = json.dumps(recipients)
 
         if not recipients:
@@ -267,72 +397,35 @@ class EmailNotificationService:
             self.repo.log_notification(severity, recipients_json, subject, "FAILED", incident_code, pipeline_id, error_msg)
             return {"status": "FAILED", "error": error_msg}
 
-        # Sandbox / Mock Mode (Default for local environments & tests without real credentials)
-        if config["mock_mode"] or not config["smtp_password"]:
+        # ── 1. MOCK / SANDBOX MODE ──────────────────────────────────────────
+        # When mock_mode is explicitly enabled, we record MOCK_DISPATCHED (never 'SENT')
+        if config["mock_mode"]:
             self.repo.log_notification(
                 severity=severity,
                 recipients_json=recipients_json,
                 subject=subject,
-                status="SENT",
+                status="MOCK_DISPATCHED",
                 incident_code=incident_code,
                 pipeline_id=pipeline_id,
                 channel="EMAIL (MOCK/SANDBOX)",
             )
             return {
-                "status": "SENT",
+                "status": "MOCK_DISPATCHED",
                 "mode": "MOCK",
                 "recipients_count": len(recipients),
                 "recipients": recipients,
                 "subject": subject,
-                "message": f"Alert successfully dispatched to {len(recipients)} team member(s) [Sandbox Mode].",
+                "message": f"Simulated mock notification generated for {len(recipients)} team member(s) [Sandbox Mode].",
             }
 
-        # Real SMTP Transport
-        try:
-            msg = MIMEMultipart("alternative")
-            msg["Subject"] = subject
-            msg["From"] = f"{config['sender_name']} <{config['sender_email']}>"
-            msg["To"] = ", ".join(recipients)
-
-            msg.attach(MIMEText(plain_content, "plain", "utf-8"))
-            msg.attach(MIMEText(html_content, "html", "utf-8"))
-
-            if config["smtp_use_ssl"]:
-                server = smtplib.SMTP_SSL(config["smtp_host"], config["smtp_port"], timeout=10)
-            else:
-                server = smtplib.SMTP(config["smtp_host"], config["smtp_port"], timeout=10)
-
-            server.ehlo()
-            if config["smtp_use_tls"] and not config["smtp_use_ssl"]:
-                server.starttls()
-                server.ehlo()
-
-            if config["smtp_username"] and config["smtp_password"]:
-                server.login(config["smtp_username"], config["smtp_password"])
-
-            server.sendmail(config["sender_email"], recipients, msg.as_string())
-            server.quit()
-
-            self.repo.log_notification(
-                severity=severity,
-                recipients_json=recipients_json,
-                subject=subject,
-                status="SENT",
-                incident_code=incident_code,
-                pipeline_id=pipeline_id,
-                channel="EMAIL (SMTP)",
+        # ── 2. REAL SMTP PRODUCTION MODE ────────────────────────────────────
+        # In live mode, credentials are required. Do NOT silently fall back to mock!
+        if not config["smtp_password"] or not config["smtp_username"]:
+            err_msg = (
+                "Live SMTP delivery failed: Missing SMTP credentials. "
+                "Please configure DATAGUARD_SMTP_USER and DATAGUARD_SMTP_PASSWORD, "
+                "or enter an App Password in the Settings panel."
             )
-            return {
-                "status": "SENT",
-                "mode": "LIVE_SMTP",
-                "recipients_count": len(recipients),
-                "recipients": recipients,
-                "subject": subject,
-                "message": f"Live email successfully transmitted via {config['smtp_host']} to {len(recipients)} team members.",
-            }
-
-        except Exception as e:
-            err_str = f"SMTP Transmission Error: {str(e)}"
             self.repo.log_notification(
                 severity=severity,
                 recipients_json=recipients_json,
@@ -340,15 +433,106 @@ class EmailNotificationService:
                 status="FAILED",
                 incident_code=incident_code,
                 pipeline_id=pipeline_id,
-                error_message=err_str,
+                error_message=err_msg,
                 channel="EMAIL (SMTP)",
             )
             return {
                 "status": "FAILED",
-                "error": err_str,
+                "mode": "LIVE_SMTP",
+                "error": err_msg,
                 "recipients": recipients,
-                "message": f"Failed to deliver email: {str(e)}",
+                "message": err_msg,
             }
+
+        # Execute Live SMTP Transmission with Retry Handling (up to 3 attempts)
+        max_attempts = 3
+        last_error = None
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                msg = MIMEMultipart("alternative")
+                msg["Subject"] = subject
+                msg["From"] = f"{config['sender_name']} <{config['sender_email']}>"
+                msg["To"] = ", ".join(recipients)
+
+                msg.attach(MIMEText(plain_content, "plain", "utf-8"))
+                msg.attach(MIMEText(html_content, "html", "utf-8"))
+
+                if config["smtp_use_ssl"]:
+                    server = smtplib.SMTP_SSL(config["smtp_host"], config["smtp_port"], timeout=12)
+                else:
+                    server = smtplib.SMTP(config["smtp_host"], config["smtp_port"], timeout=12)
+
+                server.ehlo()
+                if config["smtp_use_tls"] and not config["smtp_use_ssl"]:
+                    server.starttls()
+                    server.ehlo()
+
+                server.login(config["smtp_username"], config["smtp_password"])
+                server.sendmail(config["sender_email"], recipients, msg.as_string())
+                server.quit()
+
+                # Record successful delivery
+                self.repo.log_notification(
+                    severity=severity,
+                    recipients_json=recipients_json,
+                    subject=subject,
+                    status="SMTP_ACCEPTED",
+                    incident_code=incident_code,
+                    pipeline_id=pipeline_id,
+                    channel="EMAIL (SMTP)",
+                )
+                return {
+                    "status": "SMTP_ACCEPTED",
+                    "mode": "LIVE_SMTP",
+                    "recipients_count": len(recipients),
+                    "recipients": recipients,
+                    "subject": subject,
+                    "attempt": attempt,
+                    "message": f"SMTP accepted message for delivery to {len(recipients)} team member(s) via {config['smtp_host']}:{config['smtp_port']} (Attempt {attempt}/{max_attempts}).",
+                }
+
+            except smtplib.SMTPAuthenticationError as e:
+                # Authentication failures will not succeed on retry; exit immediately
+                err = self._sanitize_error(str(e), config["smtp_password"])
+                last_error = (
+                    f"SMTP Authentication Error: {err}. "
+                    "For Gmail, use a 16-character Google App Password (https://myaccount.google.com/apppasswords). "
+                    "Your regular Google account password is rejected with '535 5.7.8 BadCredentials'."
+                )
+                break
+
+            except (smtplib.SMTPConnectError, ConnectionRefusedError, socket.timeout, TimeoutError, OSError) as e:
+                err = self._sanitize_error(str(e), config["smtp_password"])
+                last_error = f"SMTP Connection/Network Error on attempt {attempt}/{max_attempts}: {err}"
+                if attempt < max_attempts:
+                    time.sleep(1.0 * attempt)
+
+            except Exception as e:
+                err = self._sanitize_error(str(e), config["smtp_password"])
+                last_error = f"SMTP Transmission Error on attempt {attempt}/{max_attempts}: {err}"
+                if attempt < max_attempts:
+                    time.sleep(1.0 * attempt)
+
+        # Log failed delivery
+        clean_err = self._sanitize_error(str(last_error), config.get("smtp_password"))
+        self.repo.log_notification(
+            severity=severity,
+            recipients_json=recipients_json,
+            subject=subject,
+            status="FAILED",
+            incident_code=incident_code,
+            pipeline_id=pipeline_id,
+            error_message=clean_err,
+            channel="EMAIL (SMTP)",
+        )
+        return {
+            "status": "FAILED",
+            "mode": "LIVE_SMTP",
+            "error": clean_err,
+            "recipients": recipients,
+            "message": f"Failed to deliver email after {max_attempts} attempt(s): {clean_err}",
+        }
 
     def _build_incident_html(
         self,
@@ -360,6 +544,7 @@ class EmailNotificationService:
         downstream_impact: str,
         recommended_action: str,
         dashboard_url: str,
+        is_mock: bool = False,
     ) -> str:
         """Constructs an enterprise dark-theme HTML email template."""
         sev_colors = {
@@ -370,6 +555,11 @@ class EmailNotificationService:
         }
         color, bg_color, badge_text = sev_colors.get(severity.upper(), ("#F43F5E", "rgba(244, 63, 94, 0.15)", severity))
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC")
+        mode_pill = (
+            '<span style="background:rgba(0,201,255,0.15);color:#00C9FF;border:1px solid #00C9FF;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:700;margin-left:8px;">MOCK SIMULATION</span>'
+            if is_mock
+            else '<span style="background:rgba(16,185,129,0.15);color:#10B981;border:1px solid #10B981;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:700;margin-left:8px;">LIVE SMTP</span>'
+        )
 
         return f"""
         <!DOCTYPE html>
@@ -388,7 +578,7 @@ class EmailNotificationService:
                         <tr>
                             <td>
                                 <h1 style="margin: 0; color: #00C9FF; font-size: 22px; font-weight: 700; letter-spacing: -0.5px;">🛡️ DataGuard Alert Center</h1>
-                                <p style="margin: 4px 0 0 0; color: #94A3B8; font-size: 13px;">Intelligent Pipeline Reliability & Recovery Guide</p>
+                                <p style="margin: 4px 0 0 0; color: #94A3B8; font-size: 13px;">Intelligent Pipeline Reliability & Recovery Guide {mode_pill}</p>
                             </td>
                             <td style="text-align: right;">
                                 <span style="background-color: {bg_color}; color: {color}; border: 1px solid {color}; padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: 700; display: inline-block;">

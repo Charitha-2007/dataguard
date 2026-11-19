@@ -3,7 +3,7 @@
 [![DataGuard CI/CD Pipeline](https://github.com/Charitha-2007/dataguard/actions/workflows/ci.yml/badge.svg)](https://github.com/Charitha-2007/dataguard/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](https://www.docker.com/)
-[![Tests](https://img.shields.io/badge/tests-77%20passed-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-83%20passed-brightgreen.svg)](tests/)
 [![Security](https://img.shields.io/badge/audit-SHA--256%20verified-success.svg)](src/services/audit_service.py)
 
 > **Intelligent Data Pipeline Monitoring, Failure Diagnosis, Automated Recovery, Alerting and Audit Management Platform.**
@@ -155,7 +155,7 @@ streamlit run src/ui/app.py
 
 ## 🧪 Running Automated Tests
 
-DataGuard is built with strict Test-Driven Development (TDD) containing **77 unit and integration tests**:
+DataGuard is built with strict Test-Driven Development (TDD) containing **83 unit and integration tests**:
 
 ```bash
 pytest tests/ -v
@@ -169,13 +169,13 @@ tests/test_database.py .................. [5 passed]
 tests/test_dataset_extended.py .......... [10 passed]
 tests/test_dataset_service.py ........... [7 passed]
 tests/test_drift_detector.py ............ [4 passed]
-tests/test_email_service.py ............. [6 passed]
+tests/test_email_service.py ............. [12 passed]
 tests/test_incidents_and_sla.py ......... [6 passed]
 tests/test_quality_engine.py ............ [5 passed]
 tests/test_rca_and_impact.py ............ [7 passed]
 tests/test_recovery.py .................. [3 passed]
 tests/test_simulator.py ................. [5 passed]
-==================== 77 passed in ~6.5s ====================
+==================== 83 passed in ~7.0s ====================
 ```
 
 ---

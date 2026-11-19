@@ -44,7 +44,9 @@ from src.recovery.recovery_executor import RecoveryExecutor
 from src.recovery.verifier import RecoveryVerifier
 from src.services.audit_service import AuditService
 from src.services.auth import AuthService, UserSession
+from src.services.data_cleaner import CleaningConfig, DataCleaningService
 from src.services.dataset_service import DatasetService
+from src.services.email_service import EmailNotificationService
 from src.services.incident_manager import IncidentManager
 from src.services.knowledge_base import KnowledgeBaseService
 from src.services.notifier import NotificationDispatcher
@@ -159,7 +161,9 @@ drift_detector = DriftAnomalyDetector()
 rca_engine = RootCauseAnalysisEngine()
 impact_analyzer = DependencyImpactAnalyzer(repo=repo)
 sla_monitor = SLAMonitor(repo=repo)
-notifier = NotificationDispatcher()
+email_service = EmailNotificationService(repo=repo)
+notifier = NotificationDispatcher(repo=repo, email_service=email_service)
+cleaner = DataCleaningService()
 incident_manager = IncidentManager(repo=repo, notifier=notifier)
 audit_service = AuditService(repo=repo)
 kb_service = KnowledgeBaseService(repo=repo)
@@ -209,9 +213,11 @@ with st.sidebar:
         [
             "📊  Overview",
             "📁  Datasets & Ingestion",
+            "🧹  Dataset Cleaning & Export",
             "🧪  Simulator Lab",
             "🚨  Incidents & Recovery",
             "📈  Drift Explorer",
+            "📧  Email Alerts & Notifications",
             "🛡️  Audit & Knowledge",
         ],
         label_visibility="collapsed",
@@ -804,6 +810,221 @@ elif "Datasets" in page:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# VIEW 2.5 — DATASET CLEANING, SANITIZATION & EXPORT
+# ═════════════════════════════════════════════════════════════════════════════
+elif "Cleaning" in page:
+
+    st.title("🧹 Dataset Preprocessing, Sanitization & Export Center")
+    st.caption(
+        "Sanitize raw datasets, eliminate duplicate rows, impute missing values with robust statistics, clip outliers, and export production-ready cleaned CSV or Excel spreadsheets."
+    )
+    st.divider()
+
+    all_cat_ds = dataset_service.get_all_datasets()
+    source_mode = st.radio(
+        "Dataset Source",
+        ["📁 Select from Uploaded Catalog", "📤 Upload New File to Clean"],
+        horizontal=True,
+    )
+
+    clean_source_df = None
+    clean_ds_name = "dataset"
+
+    if source_mode == "📁 Select from Uploaded Catalog":
+        if not all_cat_ds:
+            st.info("ℹ️ No datasets in catalog yet. Please upload a dataset below or from the Overview page.")
+            source_mode = "📤 Upload New File to Clean"
+        else:
+            cat_map = {
+                f"{d['name']} ({d['filename']} · {d['row_count']} rows · Score: {d['quality_score']}%)": d
+                for d in all_cat_ds
+            }
+            c_ds_label = st.selectbox("Select Target Dataset from Catalog", list(cat_map.keys()))
+            selected_cat = cat_map[c_ds_label]
+            clean_source_df = dataset_service.load_dataset_df(selected_cat["id"])
+            clean_ds_name = selected_cat["name"]
+
+    if source_mode == "📤 Upload New File to Clean":
+        clean_file = st.file_uploader(
+            "Upload Dataset to Clean (.csv, .xlsx, .xls, .json)",
+            type=["csv", "xlsx", "xls", "json"],
+            key="clean_uploader_file",
+        )
+        if clean_file is not None:
+            raw_b = clean_file.getvalue()
+            try:
+                parsed, _ = dataset_service.parse_file(raw_b, clean_file.name)
+                clean_source_df = parsed
+                clean_ds_name = Path(clean_file.name).stem
+                st.success(f"✅ Loaded **{clean_file.name}** ({len(parsed)} rows, {len(parsed.columns)} columns)")
+            except Exception as e:
+                st.error(f"❌ Failed to parse file: {e}")
+
+    if clean_source_df is not None:
+        with st.expander("🔎 Raw Dataset Preview (Before Cleaning)", expanded=False):
+            st.dataframe(clean_source_df.head(5), width='stretch')
+
+        st.subheader("⚙️ Data Cleaning Rules & Configuration")
+        with st.container(border=True):
+            cr_col1, cr_col2, cr_col3, cr_col4 = st.columns(4, gap="medium")
+
+            with cr_col1:
+                st.markdown("**1. Duplicate Rows**")
+                opt_dedup = st.checkbox(
+                    "Remove Duplicate Rows",
+                    value=True,
+                    help="Detects and removes identical duplicate rows, keeping the first occurrence.",
+                )
+
+            with cr_col2:
+                st.markdown("**2. Missing Values**")
+                opt_missing = st.selectbox(
+                    "Missing Strategy",
+                    ["Smart Imputation (Median / Mode)", "Drop Rows with Missing Values", "Keep Missing Unchanged"],
+                    index=0,
+                    help="Median for numeric columns protects against outlier distortion; mode is used for text/categories.",
+                )
+                missing_strat_code = (
+                    "IMPUTE"
+                    if "Imputation" in opt_missing
+                    else ("DROP" if "Drop" in opt_missing else "KEEP")
+                )
+
+            with cr_col3:
+                st.markdown("**3. Statistical Outliers**")
+                opt_outliers = st.selectbox(
+                    "Outlier Strategy (IQR)",
+                    ["Clip to IQR Bounds", "Drop Outlier Rows", "Keep Outliers Unchanged"],
+                    index=0,
+                    help="IQR bounds: [Q1 - 1.5*IQR, Q3 + 1.5*IQR]. Clipping retains row volume while neutralizing extreme spikes.",
+                )
+                outlier_strat_code = (
+                    "CLIP"
+                    if "Clip" in opt_outliers
+                    else ("DROP" if "Drop" in opt_outliers else "KEEP")
+                )
+
+            with cr_col4:
+                st.markdown("**4. Formatting & Normalization**")
+                opt_trim = st.checkbox("Trim Whitespaces", value=True, help="Removes leading and trailing whitespace from string columns.")
+                opt_snake = st.checkbox("Standardize Headers", value=False, help="Normalizes headers to snake_case format.")
+
+            if st.button("🚀 Clean & Sanitize Dataset", type="primary", width='stretch'):
+                with st.spinner("Sanitizing dataset and generating compliance telemetry..."):
+                    cfg = CleaningConfig(
+                        remove_duplicates=opt_dedup,
+                        missing_strategy=missing_strat_code,
+                        outlier_strategy=outlier_strat_code,
+                        trim_strings=opt_trim,
+                        standardize_headers=opt_snake,
+                    )
+                    report = cleaner.clean(clean_source_df, cfg, dataset_name=clean_ds_name)
+                    st.session_state["cleaning_report"] = report
+                    st.success("✨ Dataset cleaning completed successfully!")
+
+        # Display Cleaning Telemetry and Download Options
+        if "cleaning_report" in st.session_state:
+            rep: CleaningReport = st.session_state["cleaning_report"]
+            st.divider()
+
+            st.subheader("📊 Cleaning Results & Data Health Improvement")
+
+            k1, k2, k3, k4, k5, k6 = st.columns(6)
+            k1.metric("Original Rows", f"{rep.original_rows:,}")
+            k2.metric(
+                "Cleaned Rows",
+                f"{rep.cleaned_rows:,}",
+                f"-{rep.removed_rows} rows" if rep.removed_rows > 0 else "0 dropped",
+                delta_color="normal" if rep.removed_rows == 0 else "inverse",
+            )
+            k3.metric("Duplicates Removed", rep.duplicates_removed, "Exact Match")
+            k4.metric("Missing Handled", rep.missing_handled, "Cells Sanitized")
+            k5.metric("Outliers Treated", rep.outliers_handled, "IQR Boundaries")
+            score_delta = round(rep.final_quality_score - rep.initial_quality_score, 1)
+            k6.metric(
+                "Quality Score",
+                f"{rep.final_quality_score}%",
+                f"+{score_delta}%" if score_delta > 0 else f"{score_delta}%",
+            )
+
+            # Operations Audit Log
+            with st.expander("📋 Applied Operations Audit Log", expanded=True):
+                for op in rep.operations_log:
+                    st.markdown(f"- ✅ **{op}**")
+                if not rep.operations_log:
+                    st.markdown("- ℹ️ Dataset was already 100% clean. No transformations were required.")
+
+            st.divider()
+
+            # ── DOWNLOAD SECTION ──────────────────────────────────────────────
+            st.subheader("📥 Export & Download Cleaned Dataset")
+            st.caption(
+                f"Generated from actual sanitized data. The original source dataset remains completely untouched in storage."
+            )
+
+            down_col1, down_col2, down_col3 = st.columns([2, 2, 2], gap="medium")
+
+            with down_col1:
+                csv_bytes = cleaner.export_csv(rep.clean_df)
+                st.download_button(
+                    label="📄 Download Cleaned CSV",
+                    data=csv_bytes,
+                    file_name=rep.clean_csv_filename,
+                    mime="text/csv",
+                    type="primary",
+                    width='stretch',
+                    help="Exports UTF-8 encoded sanitized CSV file.",
+                )
+
+            with down_col2:
+                xlsx_bytes = cleaner.export_excel(rep.clean_df)
+                st.download_button(
+                    label="📊 Download Cleaned Excel (.xlsx)",
+                    data=xlsx_bytes,
+                    file_name=rep.clean_xlsx_filename,
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    width='stretch',
+                    help="Exports formatted Excel workbook with auto-fitted column dimensions.",
+                )
+
+            with down_col3:
+                if st.button("💾 Save Cleaned to Catalog", width='stretch'):
+                    saved_ds = dataset_service.save_dataset(
+                        name=f"{clean_ds_name} (Cleaned)",
+                        filename=rep.clean_csv_filename,
+                        df=rep.clean_df,
+                        raw_bytes=csv_bytes,
+                        actor=current_user.username,
+                    )
+                    st.success(f"🎉 Saved to catalog as `{saved_ds.name}` (ID: `{saved_ds.id}`)!")
+
+            st.divider()
+
+            # Preview Tabs
+            tab_clean_prev, tab_quar_prev = st.tabs(
+                [f"📋 Cleaned Dataset Preview ({len(rep.clean_df)} rows)", f"🗑️ Quarantined / Dropped Rows ({len(rep.quarantined_df)} rows)"]
+            )
+
+            with tab_clean_prev:
+                st.dataframe(rep.clean_df.head(50), width='stretch')
+                st.caption(f"Showing first 50 rows of {len(rep.clean_df):,} total sanitized records.")
+
+            with tab_quar_prev:
+                if len(rep.quarantined_df) > 0:
+                    st.warning(f"⚠️ {len(rep.quarantined_df)} row(s) were removed from production due to duplicates, missing critical values, or severe outliers.")
+                    st.dataframe(rep.quarantined_df, width='stretch')
+                    quar_csv = rep.quarantined_df.to_csv(index=False).encode("utf-8")
+                    st.download_button(
+                        "📥 Download Quarantined Rows as Dead-Letter CSV",
+                        data=quar_csv,
+                        file_name=f"quarantined_{clean_ds_name}_{rep.timestamp_str}.csv",
+                        mime="text/csv",
+                    )
+                else:
+                    st.success("🟢 Zero rows dropped or quarantined. Entire dataset preserved.")
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # VIEW 3 — PIPELINE SIMULATOR & CHAOS FAULT LAB
 # ═════════════════════════════════════════════════════════════════════════════
 elif "Simulator" in page:
@@ -1112,7 +1333,405 @@ elif "Incidents" in page:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# VIEW 5 — STATISTICAL DRIFT & ANOMALY EXPLORER
+# VIEW 5 — EMAIL ALERT MANAGEMENT & TEAM NOTIFICATIONS
+# ═════════════════════════════════════════════════════════════════════════════
+elif "Email" in page:
+    import json as _json
+
+    st.title("📧 Email Alert Management & Team Notifications")
+    st.caption(
+        "Configure automated SMTP alerts dispatched to all 5 team members on critical pipeline failures, "
+        "SLA breaches, schema drift, and data quality degradations."
+    )
+    st.divider()
+
+    # ── Role-based access ──────────────────────────────────────────────────
+    is_admin = current_user.role == "admin"
+    is_engineer = current_user.role in ("admin", "engineer")
+
+    cfg = email_service.get_config()
+    recipients_list: list = cfg.get("recipients", [])
+
+    # Ensure exactly 5 slots
+    while len(recipients_list) < 5:
+        recipients_list.append("")
+
+    tab_settings, tab_history = st.tabs(["⚙️ SMTP Settings & Recipients", "📋 Notification History"])
+
+    # ═══════════════════════════════════════════════════════════════════
+    # TAB 1 — SETTINGS PANEL (admin only can save; others see read-only)
+    # ═══════════════════════════════════════════════════════════════════
+    with tab_settings:
+        col_set_l, col_set_r = st.columns([3, 2])
+
+        with col_set_l:
+            st.subheader("🔧 SMTP Transport Configuration")
+
+            if not is_admin:
+                st.info("🔒 **View-only mode** — Only the **admin** role can modify notification settings.")
+
+            with st.form("email_settings_form"):
+                # Enable / disable
+                form_enabled = st.toggle(
+                    "Enable Automated Email Notifications",
+                    value=cfg.get("is_enabled", True),
+                    disabled=not is_admin,
+                    help="Master switch. When off, no emails are dispatched regardless of incidents.",
+                )
+
+                st.markdown("---")
+                st.markdown("**SMTP Server**")
+                fcol1, fcol2 = st.columns([3, 1])
+                with fcol1:
+                    form_smtp_host = st.text_input(
+                        "SMTP Host",
+                        value=cfg.get("smtp_host", "smtp.gmail.com"),
+                        placeholder="smtp.gmail.com",
+                        disabled=not is_admin,
+                    )
+                with fcol2:
+                    form_smtp_port = st.number_input(
+                        "Port",
+                        min_value=1,
+                        max_value=65535,
+                        value=int(cfg.get("smtp_port", 587)),
+                        disabled=not is_admin,
+                    )
+
+                fcol3, fcol4 = st.columns(2)
+                with fcol3:
+                    form_use_tls = st.checkbox(
+                        "Use STARTTLS (port 587)",
+                        value=bool(cfg.get("smtp_use_tls", True)),
+                        disabled=not is_admin,
+                    )
+                with fcol4:
+                    form_use_ssl = st.checkbox(
+                        "Use SSL/TLS (port 465)",
+                        value=bool(cfg.get("smtp_use_ssl", False)),
+                        disabled=not is_admin,
+                        help="Mutually exclusive with STARTTLS. SSL wraps the connection from the start.",
+                    )
+
+                st.markdown("---")
+                st.markdown("**Sender Identity**")
+                fcol5, fcol6 = st.columns(2)
+                with fcol5:
+                    form_sender_email = st.text_input(
+                        "Sender Email Address",
+                        value=cfg.get("sender_email", "alerts@dataguard.local"),
+                        disabled=not is_admin,
+                    )
+                with fcol6:
+                    form_sender_name = st.text_input(
+                        "Display Name",
+                        value=cfg.get("sender_name", "DataGuard Monitoring"),
+                        disabled=not is_admin,
+                    )
+
+                st.markdown("---")
+                st.markdown("**Authentication**")
+                fcol7, fcol8 = st.columns(2)
+                with fcol7:
+                    form_smtp_user = st.text_input(
+                        "SMTP Username",
+                        value=cfg.get("smtp_username", ""),
+                        disabled=not is_admin,
+                        placeholder="your-email@gmail.com",
+                    )
+                with fcol8:
+                    form_smtp_pass = st.text_input(
+                        "App Password",
+                        value="",
+                        type="password",
+                        disabled=not is_admin,
+                        help="Leave blank to keep the existing stored password. Use a Gmail App Password (never your account password).",
+                        placeholder="Leave blank to keep existing",
+                    )
+
+                st.markdown("---")
+                st.markdown("**Alert Filtering**")
+                fcol9, fcol10 = st.columns(2)
+                with fcol9:
+                    form_threshold = st.selectbox(
+                        "Minimum Severity to Notify",
+                        options=["ALL", "CRITICAL_HIGH", "CRITICAL_ONLY"],
+                        index=["ALL", "CRITICAL_HIGH", "CRITICAL_ONLY"].index(
+                            cfg.get("severity_threshold", "ALL")
+                        ),
+                        disabled=not is_admin,
+                        help="ALL=P1-P4 | CRITICAL_HIGH=P1,P2 | CRITICAL_ONLY=P1",
+                    )
+                with fcol10:
+                    form_cooldown = st.slider(
+                        "Duplicate Suppression Cooldown (minutes)",
+                        min_value=5,
+                        max_value=240,
+                        value=int(cfg.get("cooldown_minutes", 30)),
+                        step=5,
+                        disabled=not is_admin,
+                        help="Identical alerts for the same pipeline within this window will be suppressed.",
+                    )
+
+                form_mock = st.toggle(
+                    "🧪 Sandbox / Mock Mode (simulate delivery without real SMTP)",
+                    value=bool(cfg.get("mock_mode", True)),
+                    disabled=not is_admin,
+                    help="Default ON. When enabled, emails are simulated and logged — no SMTP connection is made. Safe for local testing.",
+                )
+
+                st.markdown("---")
+                st.markdown("**👥 Team Recipients (5 members)**")
+                form_recipients = []
+                member_labels = [
+                    "Lead Architect / On-Call Engineer",
+                    "Data Engineer (Primary On-Call)",
+                    "QA Lead",
+                    "DevOps / Security Engineer",
+                    "Product Owner",
+                ]
+                for idx, label in enumerate(member_labels):
+                    r_email = st.text_input(
+                        f"Member {idx + 1} — {label}",
+                        value=recipients_list[idx] if idx < len(recipients_list) else "",
+                        placeholder="name@company.com",
+                        disabled=not is_admin,
+                        key=f"email_recip_{idx}",
+                    )
+                    form_recipients.append(r_email)
+
+                st.markdown("")
+                save_col, test_col = st.columns([1, 1])
+
+                with save_col:
+                    save_submitted = st.form_submit_button(
+                        "💾 Save Settings",
+                        type="primary",
+                        disabled=not is_admin,
+                        use_container_width=True,
+                    )
+                with test_col:
+                    test_submitted = st.form_submit_button(
+                        "📨 Send Test Email",
+                        disabled=not is_engineer,
+                        use_container_width=True,
+                    )
+
+                if save_submitted and is_admin:
+                    valid_recipients = [r.strip() for r in form_recipients if r.strip()]
+                    if not valid_recipients:
+                        st.error("❌ At least one recipient email address is required.")
+                    else:
+                        try:
+                            repo.update_notification_settings(
+                                is_enabled=form_enabled,
+                                smtp_host=form_smtp_host.strip(),
+                                smtp_port=int(form_smtp_port),
+                                smtp_use_tls=form_use_tls,
+                                smtp_use_ssl=form_use_ssl,
+                                sender_email=form_sender_email.strip(),
+                                sender_name=form_sender_name.strip(),
+                                smtp_username=form_smtp_user.strip(),
+                                smtp_password=form_smtp_pass if form_smtp_pass else None,
+                                recipients=valid_recipients,
+                                severity_threshold=form_threshold,
+                                cooldown_minutes=int(form_cooldown),
+                                mock_mode=form_mock,
+                                updated_by=current_user.username,
+                            )
+                            st.success(
+                                f"✅ **Settings saved** — Configuration updated for {len(valid_recipients)} recipient(s). "
+                                f"Mock mode: {'ON (simulated delivery)' if form_mock else 'OFF (live SMTP)'}."
+                            )
+                            # Refresh email_service config from DB on next run
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ Failed to save settings: {e}")
+
+                if test_submitted and is_engineer:
+                    with st.spinner("Dispatching test email to all recipients..."):
+                        result = email_service.send_test_email()
+                    if result.get("status") == "SENT":
+                        mode_badge = "🧪 Mock / Sandbox" if result.get("mode") == "MOCK" else "✉️ Live SMTP"
+                        st.success(
+                            f"✅ **Test email dispatched** [{mode_badge}] — "
+                            f"Delivered to {result.get('recipients_count', 0)} recipient(s)."
+                        )
+                        with st.expander("📋 Delivery Details"):
+                            st.code(result.get("subject", ""), language="text")
+                            recip_display = result.get("recipients", [])
+                            for r in recip_display:
+                                st.markdown(f"• `{r}`")
+                    elif result.get("status") == "DISABLED":
+                        st.warning("⚠️ Email notifications are currently disabled. Enable them in settings first.")
+                    else:
+                        st.error(f"❌ Test email failed: {result.get('error', result.get('message', 'Unknown error'))}")
+
+        with col_set_r:
+            st.subheader("📊 Notification Status")
+
+            # Live status card
+            enabled_badge = "🟢 **ACTIVE**" if cfg.get("is_enabled", True) else "🔴 **DISABLED**"
+            mode_badge = "🧪 Mock / Sandbox" if cfg.get("mock_mode", True) else "✉️ Live SMTP"
+
+            st.markdown(
+                f"""
+                <div style="background: linear-gradient(135deg, #111827, #0f172a); border: 1px solid rgba(0,201,255,0.25);
+                            border-radius: 10px; padding: 20px; margin-bottom: 16px;">
+                    <div style="font-size: 11px; color: #64748B; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px;">System Status</div>
+                    <div style="font-size: 20px; font-weight: 700; color: #F1F5F9; margin-bottom: 4px;">{enabled_badge}</div>
+                    <div style="font-size: 13px; color: #94A3B8; margin-top: 8px;">Mode: {mode_badge}</div>
+                    <div style="font-size: 13px; color: #94A3B8;">SMTP: <code style="color:#00C9FF;">{cfg.get('smtp_host','—')}:{cfg.get('smtp_port','—')}</code></div>
+                    <div style="font-size: 13px; color: #94A3B8;">Recipients: <strong style="color:#F1F5F9;">{len([r for r in recipients_list if r])}</strong> / 5 configured</div>
+                    <div style="font-size: 13px; color: #94A3B8;">Cooldown: <strong style="color:#F1F5F9;">{cfg.get('cooldown_minutes', 30)} min</strong></div>
+                    <div style="font-size: 13px; color: #94A3B8;">Threshold: <strong style="color:#F1F5F9;">{cfg.get('severity_threshold', 'ALL')}</strong></div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            # Recent delivery stats
+            recent_logs = repo.get_recent_notification_logs(limit=100)
+            sent_count = sum(1 for l in recent_logs if l.get("status") == "SENT")
+            failed_count = sum(1 for l in recent_logs if l.get("status") == "FAILED")
+            suppressed_count = sum(1 for l in recent_logs if "SUPPRESSED" in str(l.get("status", "")))
+            total_count = len(recent_logs)
+
+            st.metric("Total Notifications (All Time)", total_count)
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Sent", sent_count, delta=None)
+            m2.metric("Failed", failed_count, delta=None)
+            m3.metric("Suppressed", suppressed_count, delta=None)
+
+            if total_count > 0:
+                delivery_rate = round((sent_count / total_count) * 100, 1)
+                st.progress(sent_count / total_count, text=f"{delivery_rate}% delivery rate")
+
+            st.markdown("---")
+            st.markdown("**🔑 Configured Recipients**")
+            configured_recipients = [r for r in recipients_list if r.strip()]
+            if configured_recipients:
+                for i, r in enumerate(configured_recipients, 1):
+                    # Mask email for security (show first 3 chars + domain)
+                    parts = r.split("@")
+                    if len(parts) == 2:
+                        masked = f"{parts[0][:3]}***@{parts[1]}"
+                    else:
+                        masked = r
+                    st.markdown(f"`{i}.` {masked}")
+            else:
+                st.warning("No recipients configured yet.")
+
+            st.markdown("---")
+            st.markdown("**📡 Environment Overrides**")
+            st.caption("These env vars override DB settings when set:")
+            override_vars = [
+                "DATAGUARD_SMTP_HOST",
+                "DATAGUARD_SMTP_PORT",
+                "DATAGUARD_SENDER_EMAIL",
+                "DATAGUARD_SMTP_USER",
+                "DATAGUARD_SMTP_PASSWORD",
+            ]
+            import os as _os
+            for var in override_vars:
+                val = _os.environ.get(var)
+                if val:
+                    st.markdown(f"✅ `{var}` → **set**")
+                else:
+                    st.markdown(f"⬜ `{var}` → *not set*")
+
+    # ═══════════════════════════════════════════════════════════════════
+    # TAB 2 — NOTIFICATION HISTORY TABLE
+    # ═══════════════════════════════════════════════════════════════════
+    with tab_history:
+        st.subheader("📋 Notification Dispatch History")
+        st.caption("Full audit log of all alert dispatch attempts including suppressed and failed deliveries.")
+
+        refresh_col, limit_col = st.columns([1, 2])
+        with limit_col:
+            history_limit = st.selectbox(
+                "Show last", options=[25, 50, 100, 200], index=1, label_visibility="collapsed"
+            )
+            st.caption(f"Showing last {history_limit} entries")
+        with refresh_col:
+            if st.button("🔄 Refresh", use_container_width=True):
+                st.rerun()
+
+        log_entries = repo.get_recent_notification_logs(limit=history_limit)
+
+        if not log_entries:
+            st.info(
+                "📭 No notifications have been dispatched yet. "
+                "Trigger an incident simulation in the **Simulator Lab** or send a **Test Email** above."
+            )
+        else:
+            # Build status badges using HTML
+            def _status_badge(status: str) -> str:
+                status_upper = str(status).upper()
+                if status_upper == "SENT":
+                    return '<span style="background:rgba(16,185,129,0.15);color:#10B981;border:1px solid #10B981;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:700;">✓ SENT</span>'
+                elif status_upper == "FAILED":
+                    return '<span style="background:rgba(244,63,94,0.15);color:#F43F5E;border:1px solid #F43F5E;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:700;">✗ FAILED</span>'
+                elif "SUPPRESSED" in status_upper:
+                    return '<span style="background:rgba(245,158,11,0.15);color:#F59E0B;border:1px solid #F59E0B;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:700;">⊘ SUPPRESSED</span>'
+                elif status_upper == "DISABLED":
+                    return '<span style="background:rgba(100,116,139,0.15);color:#94A3B8;border:1px solid #475569;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:700;">— DISABLED</span>'
+                return f'<span style="color:#94A3B8;">{status}</span>'
+
+            def _sev_badge(sev: str) -> str:
+                sev_upper = str(sev).upper()
+                sev_map = {
+                    "P1": "#F43F5E", "P2": "#F59E0B", "P3": "#00C9FF",
+                    "P4": "#10B981", "INFO": "#7C3AED", "CRITICAL": "#F43F5E",
+                    "HIGH": "#F59E0B",
+                }
+                color = sev_map.get(sev_upper, "#94A3B8")
+                return f'<span style="color:{color};font-weight:700;">{sev}</span>'
+
+            # Render table rows
+            header_cols = st.columns([2, 1.5, 1.5, 0.8, 1, 1.5, 1.2])
+            headers = ["Timestamp", "Pipeline ID", "Incident Code", "Severity", "Recipients", "Subject (truncated)", "Status"]
+            for hc, hd in zip(header_cols, headers):
+                hc.markdown(f"**{hd}**")
+            st.markdown('<hr style="border-color:rgba(255,255,255,0.08);margin:4px 0 8px 0;">', unsafe_allow_html=True)
+
+            for entry in log_entries:
+                try:
+                    recip_count = len(_json.loads(entry.get("recipients_json", "[]")))
+                except Exception:
+                    recip_count = "?"
+                subject_trunc = str(entry.get("subject", ""))[:55] + ("…" if len(str(entry.get("subject", ""))) > 55 else "")
+                pipeline_display = str(entry.get("pipeline_id", "—"))[:20]
+                incident_display = str(entry.get("incident_code", "—"))[:18]
+
+                row_cols = st.columns([2, 1.5, 1.5, 0.8, 1, 1.5, 1.2])
+                row_cols[0].caption(str(entry.get("timestamp", "—")))
+                row_cols[1].caption(f"`{pipeline_display}`")
+                row_cols[2].caption(f"`{incident_display}`")
+                row_cols[3].markdown(_sev_badge(str(entry.get("severity", "—"))), unsafe_allow_html=True)
+                row_cols[4].caption(f"{recip_count} member(s)")
+                row_cols[5].caption(subject_trunc)
+                row_cols[6].markdown(_status_badge(str(entry.get("status", "—"))), unsafe_allow_html=True)
+
+                # Error detail expansion
+                if entry.get("error_message"):
+                    with st.expander(f"⚠️ Error detail — {entry.get('incident_code', '')}"):
+                        st.code(entry["error_message"], language="text")
+
+            st.divider()
+            # Summary stats row
+            stat_cols = st.columns(4)
+            stat_cols[0].metric("Total Logged", len(log_entries))
+            stat_cols[1].metric("Sent", sum(1 for e in log_entries if e.get("status") == "SENT"))
+            stat_cols[2].metric("Failed", sum(1 for e in log_entries if e.get("status") == "FAILED"))
+            stat_cols[3].metric(
+                "Suppressed",
+                sum(1 for e in log_entries if "SUPPRESSED" in str(e.get("status", "")))
+            )
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# VIEW 6 — STATISTICAL DRIFT & ANOMALY EXPLORER
 # ═════════════════════════════════════════════════════════════════════════════
 elif "Drift" in page:
 

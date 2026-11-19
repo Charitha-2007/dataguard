@@ -17,6 +17,8 @@ from src.database.models import (
     RecoveryAction,
     AuditRecord,
     UploadedDataset,
+    NotificationSettings,
+    NotificationLog,
 )
 
 
@@ -496,3 +498,179 @@ class DataGuardRepository:
                 "DELETE FROM uploaded_datasets WHERE id = ?;", (dataset_id,)
             )
             return cursor.rowcount > 0
+
+    # -----------------------------------------------------------------
+    # NOTIFICATION SETTINGS & LOGS
+    # -----------------------------------------------------------------
+
+    def get_notification_settings(self) -> Dict[str, Any]:
+        """Retrieves global email alert configuration."""
+        with get_db() as conn:
+            cursor = conn.execute("SELECT * FROM notification_settings WHERE id = 1;")
+            row = cursor.fetchone()
+            if not row:
+                return {
+                    "is_enabled": 1,
+                    "smtp_host": "smtp.gmail.com",
+                    "smtp_port": 587,
+                    "smtp_use_tls": 1,
+                    "smtp_use_ssl": 0,
+                    "sender_email": "alerts@dataguard.local",
+                    "sender_name": "DataGuard Monitoring",
+                    "smtp_username": "",
+                    "smtp_password": "",
+                    "recipients_json": json.dumps([
+                        "lead_architect@dataguard.local",
+                        "data_engineer_oncall@dataguard.local",
+                        "qa_lead@dataguard.local",
+                        "devops_sec@dataguard.local",
+                        "product_owner@dataguard.local",
+                    ]),
+                    "severity_threshold": "ALL",
+                    "cooldown_minutes": 30,
+                    "mock_mode": 1,
+                }
+            return dict(row)
+
+    def update_notification_settings(
+        self,
+        is_enabled: bool,
+        smtp_host: str,
+        smtp_port: int,
+        smtp_use_tls: bool,
+        smtp_use_ssl: bool,
+        sender_email: str,
+        sender_name: str,
+        smtp_username: str,
+        smtp_password: Optional[str],
+        recipients: List[str],
+        severity_threshold: str,
+        cooldown_minutes: int,
+        mock_mode: bool,
+        updated_by: str = "admin",
+    ) -> None:
+        """Updates notification settings in database."""
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        recipients_json = json.dumps(recipients)
+
+        with get_db() as conn:
+            # If smtp_password is empty, keep existing password
+            if not smtp_password:
+                conn.execute(
+                    """UPDATE notification_settings SET
+                       is_enabled = ?, smtp_host = ?, smtp_port = ?,
+                       smtp_use_tls = ?, smtp_use_ssl = ?, sender_email = ?,
+                       sender_name = ?, smtp_username = ?, recipients_json = ?,
+                       severity_threshold = ?, cooldown_minutes = ?, mock_mode = ?,
+                       updated_at = ?, updated_by = ?
+                       WHERE id = 1;""",
+                    (
+                        1 if is_enabled else 0,
+                        smtp_host,
+                        smtp_port,
+                        1 if smtp_use_tls else 0,
+                        1 if smtp_use_ssl else 0,
+                        sender_email,
+                        sender_name,
+                        smtp_username,
+                        recipients_json,
+                        severity_threshold,
+                        cooldown_minutes,
+                        1 if mock_mode else 0,
+                        now,
+                        updated_by,
+                    ),
+                )
+            else:
+                conn.execute(
+                    """UPDATE notification_settings SET
+                       is_enabled = ?, smtp_host = ?, smtp_port = ?,
+                       smtp_use_tls = ?, smtp_use_ssl = ?, sender_email = ?,
+                       sender_name = ?, smtp_username = ?, smtp_password = ?,
+                       recipients_json = ?, severity_threshold = ?, cooldown_minutes = ?,
+                       mock_mode = ?, updated_at = ?, updated_by = ?
+                       WHERE id = 1;""",
+                    (
+                        1 if is_enabled else 0,
+                        smtp_host,
+                        smtp_port,
+                        1 if smtp_use_tls else 0,
+                        1 if smtp_use_ssl else 0,
+                        sender_email,
+                        sender_name,
+                        smtp_username,
+                        smtp_password,
+                        recipients_json,
+                        severity_threshold,
+                        cooldown_minutes,
+                        1 if mock_mode else 0,
+                        now,
+                        updated_by,
+                    ),
+                )
+
+    def log_notification(
+        self,
+        severity: str,
+        recipients_json: str,
+        subject: str,
+        status: str,
+        incident_code: Optional[str] = None,
+        pipeline_id: Optional[str] = None,
+        error_message: Optional[str] = None,
+        channel: str = "EMAIL",
+    ) -> int:
+        """Records an alert dispatch attempt in immutable notification logs."""
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with get_db() as conn:
+            cursor = conn.execute(
+                """INSERT INTO notification_logs
+                   (timestamp, incident_code, pipeline_id, severity,
+                    recipients_json, subject, status, error_message, channel)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);""",
+                (
+                    now,
+                    incident_code,
+                    pipeline_id,
+                    severity,
+                    recipients_json,
+                    subject,
+                    status,
+                    error_message,
+                    channel,
+                ),
+            )
+            return cursor.lastrowid
+
+    def get_recent_notification_logs(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """Retrieves recent notification logs for UI display and audit."""
+        with get_db() as conn:
+            cursor = conn.execute(
+                """SELECT * FROM notification_logs
+                   ORDER BY id DESC LIMIT ?;""",
+                (limit,),
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def is_notification_in_cooldown(
+        self, pipeline_id: str, incident_type: str, cooldown_minutes: int
+    ) -> bool:
+        """Checks if an alert for this pipeline failure was already sent within cooldown window."""
+        with get_db() as conn:
+            cursor = conn.execute(
+                """SELECT timestamp FROM notification_logs
+                   WHERE pipeline_id = ? AND status = 'SENT'
+                   ORDER BY id DESC LIMIT 1;""",
+                (pipeline_id,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return False
+
+            last_sent_str = row["timestamp"]
+            try:
+                last_sent = datetime.strptime(last_sent_str, "%Y-%m-%d %H:%M:%S")
+                elapsed_mins = (datetime.now() - last_sent).total_seconds() / 60.0
+                return elapsed_mins < cooldown_minutes
+            except Exception:
+                return False

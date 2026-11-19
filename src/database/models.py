@@ -142,6 +142,40 @@ CREATE TABLE IF NOT EXISTS uploaded_datasets (
     status TEXT NOT NULL DEFAULT 'UPLOADED' CHECK(status IN ('UPLOADED', 'PROCESSED', 'FAILED'))
 );
 
+-- 10. Email Notification Settings (Configurable by Administrator)
+CREATE TABLE IF NOT EXISTS notification_settings (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    is_enabled INTEGER NOT NULL DEFAULT 1,
+    smtp_host TEXT NOT NULL DEFAULT 'smtp.gmail.com',
+    smtp_port INTEGER NOT NULL DEFAULT 587,
+    smtp_use_tls INTEGER NOT NULL DEFAULT 1,
+    smtp_use_ssl INTEGER NOT NULL DEFAULT 0,
+    sender_email TEXT NOT NULL DEFAULT 'alerts@dataguard.local',
+    sender_name TEXT NOT NULL DEFAULT 'DataGuard Monitoring',
+    smtp_username TEXT NOT NULL DEFAULT '',
+    smtp_password TEXT NOT NULL DEFAULT '',
+    recipients_json TEXT NOT NULL DEFAULT '["lead_architect@dataguard.local", "data_engineer_oncall@dataguard.local", "qa_lead@dataguard.local", "devops_sec@dataguard.local", "product_owner@dataguard.local"]',
+    severity_threshold TEXT NOT NULL DEFAULT 'ALL' CHECK(severity_threshold IN ('ALL', 'CRITICAL_HIGH', 'CRITICAL_ONLY')),
+    cooldown_minutes INTEGER NOT NULL DEFAULT 30,
+    mock_mode INTEGER NOT NULL DEFAULT 1,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    updated_by TEXT NOT NULL DEFAULT 'admin'
+);
+
+-- 11. Notification Delivery History Logs
+CREATE TABLE IF NOT EXISTS notification_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    incident_code TEXT,
+    pipeline_id TEXT,
+    severity TEXT NOT NULL,
+    recipients_json TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('SENT', 'FAILED', 'SUPPRESSED_COOLDOWN')),
+    error_message TEXT,
+    channel TEXT NOT NULL DEFAULT 'EMAIL'
+);
+
 -- Performance Indexes
 CREATE INDEX IF NOT EXISTS idx_runs_pipeline_id ON pipeline_runs(pipeline_id);
 CREATE INDEX IF NOT EXISTS idx_runs_status ON pipeline_runs(status);
@@ -149,6 +183,8 @@ CREATE INDEX IF NOT EXISTS idx_incidents_status ON incidents(status);
 CREATE INDEX IF NOT EXISTS idx_incidents_pipeline ON incidents(pipeline_id);
 CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_logs(entity_type, entity_id);
 CREATE INDEX IF NOT EXISTS idx_datasets_status ON uploaded_datasets(status);
+CREATE INDEX IF NOT EXISTS idx_notif_logs_incident ON notification_logs(incident_code);
+CREATE INDEX IF NOT EXISTS idx_notif_logs_pipeline ON notification_logs(pipeline_id);
 """
 
 
@@ -255,6 +291,49 @@ class UploadedDataset:
     uploaded_by: str = "admin"
     uploaded_at: Optional[str] = None
     status: str = "UPLOADED"
+
+
+@dataclass
+class NotificationSettings:
+    is_enabled: bool = True
+    smtp_host: str = "smtp.gmail.com"
+    smtp_port: int = 587
+    smtp_use_tls: bool = True
+    smtp_use_ssl: bool = False
+    sender_email: str = "alerts@dataguard.local"
+    sender_name: str = "DataGuard Monitoring"
+    smtp_username: str = ""
+    smtp_password: str = ""
+    recipients: List[str] = None
+    severity_threshold: str = "ALL"
+    cooldown_minutes: int = 30
+    mock_mode: bool = True
+    updated_at: Optional[str] = None
+    updated_by: str = "admin"
+
+    def __post_init__(self):
+        if self.recipients is None:
+            self.recipients = [
+                "lead_architect@dataguard.local",
+                "data_engineer_oncall@dataguard.local",
+                "qa_lead@dataguard.local",
+                "devops_sec@dataguard.local",
+                "product_owner@dataguard.local",
+            ]
+
+
+@dataclass
+class NotificationLog:
+    severity: str
+    recipients_json: str
+    subject: str
+    status: str
+    incident_code: Optional[str] = None
+    pipeline_id: Optional[str] = None
+    error_message: Optional[str] = None
+    channel: str = "EMAIL"
+    timestamp: Optional[str] = None
+    id: Optional[int] = None
 
 
 # =====================================================================
@@ -379,4 +458,24 @@ def _seed_baseline_data(conn: sqlite3.Connection) -> None:
                (incident_type, error_pattern, root_cause, recommended_action, resolution_steps) 
                VALUES (?, ?, ?, ?, ?);""",
             kb_seed,
+        )
+
+    # 5. Seed Email Notification Settings (5 Team Recipients)
+    cursor.execute("SELECT COUNT(*) FROM notification_settings;")
+    if cursor.fetchone()[0] == 0:
+        default_team = json.dumps([
+            "lead_architect@dataguard.local",
+            "data_engineer_oncall@dataguard.local",
+            "qa_lead@dataguard.local",
+            "devops_sec@dataguard.local",
+            "product_owner@dataguard.local",
+        ])
+        cursor.execute(
+            """INSERT INTO notification_settings 
+               (id, is_enabled, smtp_host, smtp_port, smtp_use_tls, smtp_use_ssl, 
+                sender_email, sender_name, smtp_username, smtp_password, 
+                recipients_json, severity_threshold, cooldown_minutes, mock_mode, updated_by) 
+               VALUES (1, 1, 'smtp.gmail.com', 587, 1, 0, 'alerts@dataguard.local', 
+                       'DataGuard Monitoring', '', '', ?, 'ALL', 30, 1, 'admin');""",
+            (default_team,),
         )

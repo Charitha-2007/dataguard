@@ -22,11 +22,20 @@ class AlertNotification:
 
 
 class NotificationDispatcher:
-    """Dispatches and tracks collective team alerts."""
+    """Dispatches and tracks collective team alerts across email and operational channels."""
 
-    def __init__(self):
+    def __init__(self, repo: Optional[Any] = None, email_service: Optional[Any] = None):
         # Keeps in-memory buffer of recent sent notifications (for UI and testing)
         self.sent_notifications: List[AlertNotification] = []
+        self.repo = repo
+        self._email_service = email_service
+
+    @property
+    def email_service(self):
+        if self._email_service is None:
+            from src.services.email_service import EmailNotificationService
+            self._email_service = EmailNotificationService(repo=self.repo)
+        return self._email_service
 
     def dispatch_incident_alert(
         self,
@@ -37,8 +46,9 @@ class NotificationDispatcher:
         root_cause: str,
         downstream_impact: str,
         owner_email: str,
+        recommended_action: str = "Triage and authorize recovery action in DataGuard Console.",
     ) -> AlertNotification:
-        """Dispatches an urgent incident alert to the team."""
+        """Dispatches an urgent incident alert to the team via email and operations channels."""
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         notif_id = f"NOTIF-{datetime.now().strftime('%Y%m%d%H%M%S')}-{len(self.sent_notifications) + 1}"
 
@@ -56,7 +66,7 @@ class NotificationDispatcher:
 
         notification = AlertNotification(
             notification_id=notif_id,
-            channel="SLACK",
+            channel="EMAIL",
             severity=severity,
             title=title,
             message=formatted_msg,
@@ -69,6 +79,22 @@ class NotificationDispatcher:
         )
 
         self.sent_notifications.append(notification)
+
+        # Trigger automated multi-recipient team email dispatch with duplicate suppression
+        try:
+            self.email_service.send_incident_alert(
+                incident_code=incident_code,
+                pipeline_id=pipeline_id,
+                severity=severity,
+                title=title,
+                root_cause=root_cause,
+                downstream_impact=downstream_impact,
+                recommended_action=recommended_action,
+            )
+        except Exception as e:
+            # Operational dispatch should never crash pipeline execution
+            pass
+
         return notification
 
     def dispatch_sla_breach_alert(
@@ -92,7 +118,7 @@ class NotificationDispatcher:
 
         notification = AlertNotification(
             notification_id=notif_id,
-            channel="PAGERDUTY",
+            channel="EMAIL",
             severity="P2" if overage_percent < 100 else "P1",
             title=title,
             message=msg,
@@ -105,6 +131,18 @@ class NotificationDispatcher:
         )
 
         self.sent_notifications.append(notification)
+
+        # Trigger automated email notification
+        try:
+            self.email_service.send_sla_breach_alert(
+                pipeline_id=pipeline_id,
+                sla_seconds=sla_seconds,
+                actual_duration_seconds=actual_duration_seconds,
+                overage_percent=overage_percent,
+            )
+        except Exception:
+            pass
+
         return notification
 
     def get_recent_notifications(self, limit: int = 20) -> List[Dict[str, Any]]:

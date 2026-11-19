@@ -117,6 +117,7 @@ class IncidentManager:
             root_cause=diagnosis.root_cause_summary,
             downstream_impact=downstream_summary,
             owner_email=owner_email,
+            recommended_action=diagnosis.recommended_action,
         )
 
         return incident

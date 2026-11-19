@@ -3,13 +3,14 @@
 Features:
 - Enterprise SMTP delivery (STARTTLS / SSL / Auth) with duplicate suppression & cooldown
 - Dedicated real SMTP connection testing & credential verification
+- Individual per-recipient email dispatch to all 5 team members
+- Per-recipient delivery auditing into SQLite notification_logs
+- Accurate status distinction: SENT (only after SMTP accepts), FAILED, SIMULATED
 - Retry handling with exponential backoff for transient network errors
-- Multi-recipient dispatch (all 5 team members)
+- Specific handling for invalid recipient addresses (SMTPRecipientsRefused)
 - Severity-based threshold gating (ALL, CRITICAL_HIGH, CRITICAL_ONLY)
-- Graceful sandbox / mock mode for local testing without external internet credentials
-- Clear distinction between MOCK_DISPATCHED, SMTP_ACCEPTED, and FAILED
-- Sanitized error reporting (credentials never exposed in logs or UI)
-- Full delivery auditing into SQLite notification_logs
+- Graceful sandbox mode clearly marked as SIMULATED DELIVERY
+- Sanitized error reporting (passwords and secrets never exposed)
 """
 
 import os
@@ -53,14 +54,25 @@ class EmailNotificationService:
         smtp_user = os.environ.get("DATAGUARD_SMTP_USER", st_smtp.get("username", cfg.get("smtp_username", "")))
         smtp_pass = os.environ.get("DATAGUARD_SMTP_PASSWORD", st_smtp.get("password", cfg.get("smtp_password", "")))
 
-        # Mock mode precedence: env var > secrets > database setting
+        # Determine if real SMTP credentials are present
+        has_real_credentials = bool(smtp_user and smtp_pass)
+
+        # Mock mode precedence:
+        # 1. Environment variable DATAGUARD_SMTP_MOCK (highest priority)
+        # 2. Streamlit secrets mock_mode
+        # 3. Database setting
+        # 4. If real credentials configured and no explicit setting, default OFF (False)
         env_mock = os.environ.get("DATAGUARD_SMTP_MOCK")
         if env_mock is not None:
             mock_mode = env_mock.lower() in ("true", "1", "yes")
         elif "mock_mode" in st_smtp:
             mock_mode = bool(st_smtp["mock_mode"])
-        else:
+        elif "mock_mode" in cfg:
             mock_mode = bool(cfg.get("mock_mode", 1))
+        elif has_real_credentials:
+            mock_mode = False
+        else:
+            mock_mode = True
 
         recipients_raw = cfg.get("recipients_json", "[]")
         try:
@@ -88,6 +100,7 @@ class EmailNotificationService:
             "severity_threshold": cfg.get("severity_threshold", "ALL"),
             "cooldown_minutes": int(cfg.get("cooldown_minutes", 30)),
             "mock_mode": mock_mode,
+            "has_credentials": has_real_credentials,
         }
 
     def _sanitize_error(self, error_str: str, password: Optional[str] = None) -> str:
@@ -97,7 +110,6 @@ class EmailNotificationService:
         sanitized = str(error_str)
         if password and len(password) >= 4:
             sanitized = sanitized.replace(password, "●●●●●●●●")
-        # Also clean common env password values
         env_pwd = os.environ.get("DATAGUARD_SMTP_PASSWORD")
         if env_pwd and len(env_pwd) >= 4:
             sanitized = sanitized.replace(env_pwd, "●●●●●●●●")
@@ -137,12 +149,12 @@ class EmailNotificationService:
             return {
                 "success": False,
                 "error_type": "MISSING_CREDENTIALS",
-                "message": "SMTP Username or App Password is not configured.",
+                "message": "SMTP Username or Google App Password is not configured.",
                 "hint": (
-                    "To send real emails via Gmail (smtp.gmail.com), configure: "
-                    "1) SMTP Username (your Gmail address, e.g. you@gmail.com) and "
-                    "2) A 16-character Google App Password (generate at https://myaccount.google.com/apppasswords). "
-                    "Enter these in the Settings form or export DATAGUARD_SMTP_USER and DATAGUARD_SMTP_PASSWORD."
+                    "To send real emails via Gmail (smtp.gmail.com:587): "
+                    "1) Enter your Gmail address as SMTP Username. "
+                    "2) Generate a 16-character App Password at https://myaccount.google.com/apppasswords. "
+                    "3) Save it in Settings or set DATAGUARD_SMTP_USER and DATAGUARD_SMTP_PASSWORD."
                 ),
             }
 
@@ -177,7 +189,7 @@ class EmailNotificationService:
                 "hint": (
                     "Gmail requires a 16-character App Password when 2-Step Verification is active. "
                     "Generate an App Password at https://myaccount.google.com/apppasswords and paste it as the SMTP Password. "
-                    "Regular Gmail passwords are rejected with '535 5.7.8 BadCredentials'."
+                    "Your regular Google account password will be rejected."
                 ),
             }
         except (smtplib.SMTPConnectError, ConnectionRefusedError, socket.timeout, TimeoutError, OSError) as e:
@@ -187,8 +199,8 @@ class EmailNotificationService:
                 "error_type": "CONNECTION_FAILED",
                 "message": f"Failed to connect to SMTP server at {host}:{port}: {err}",
                 "hint": (
-                    f"Check internet connectivity and firewall rules. Ensure outbound TCP connections "
-                    f"to port {port} are permitted."
+                    f"Check internet connectivity and outbound firewall rules. If port {port} is blocked "
+                    f"by a campus or enterprise network, switch to port 465 (SSL) or a personal hotspot."
                 ),
             }
         except Exception as e:
@@ -240,10 +252,9 @@ class EmailNotificationService:
                 "message": f"Alert suppressed: prior notification sent within {config['cooldown_minutes']} min cooldown.",
             }
 
-        mode_tag = " [MOCK]" if config["mock_mode"] else ""
+        mode_tag = " [SIMULATED]" if config["mock_mode"] else ""
         subject = f"[DataGuard ALERT]{mode_tag} [{severity}] Pipeline Failure – {pipeline_id} ({incident_code})"
 
-        # Build HTML & Plaintext
         html_body = self._build_incident_html(
             incident_code=incident_code,
             pipeline_id=pipeline_id,
@@ -256,14 +267,16 @@ class EmailNotificationService:
             is_mock=config["mock_mode"],
         )
         plain_body = (
-            f"=== DATAGUARD INCIDENT ALERT ({'MOCK/SIMULATED' if config['mock_mode'] else 'LIVE SMTP'}) ===\n\n"
+            f"=== DATAGUARD INCIDENT ALERT ({'SIMULATED DELIVERY' if config['mock_mode'] else 'LIVE SMTP'}) ===\n\n"
+            f"Project: DataGuard\n"
             f"Severity: {severity}\n"
-            f"Incident Code: {incident_code}\n"
+            f"Incident ID: {incident_code}\n"
             f"Pipeline: {pipeline_id}\n"
-            f"Title: {title}\n"
+            f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}\n"
+            f"Error Description: {title}\n"
             f"Root Cause: {root_cause}\n"
             f"Downstream Impact: {downstream_impact}\n"
-            f"Suggested Action: {recommended_action}\n"
+            f"Recommended Action: {recommended_action}\n"
             f"Dashboard URL: {dashboard_url}\n"
         )
 
@@ -293,8 +306,6 @@ class EmailNotificationService:
         if not config["is_enabled"]:
             return {"status": "DISABLED", "message": "Email notifications are disabled."}
 
-        mode_tag = " [MOCK]" if config["mock_mode"] else ""
-        subject = f"[DataGuard ALERT]{mode_tag} [{severity}] SLA Breach – {pipeline_id} (+{overage_percent}%)"
         title = f"Pipeline '{pipeline_id}' latency SLA breached"
         root_cause = f"Execution took {actual_duration_seconds:.2f}s, exceeding budget of {sla_seconds}s by {overage_percent}%."
         impact = "Downstream analytics feeds and business consumers may experience stale data."
@@ -312,12 +323,12 @@ class EmailNotificationService:
         )
 
     def send_test_email(self, test_recipients: Optional[List[str]] = None) -> Dict[str, Any]:
-        """Dispatches an immediate test email to verify SMTP configuration and team delivery."""
+        """Dispatches an operational verification test email individually to configured recipients."""
         config = self.get_config()
         recipients = test_recipients or config["recipients"]
 
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        mode_label = "MOCK / SIMULATED" if config["mock_mode"] else "LIVE SMTP"
+        mode_label = "SIMULATED DELIVERY" if config["mock_mode"] else "LIVE SMTP"
         subject = f"[DataGuard TEST] Operational Verification ({mode_label}) – {now_str}"
 
         html_body = f"""
@@ -332,26 +343,26 @@ class EmailNotificationService:
                 <div style="padding: 24px;">
                     <div style="background-color: rgba(16, 185, 129, 0.1); border-left: 4px solid #10B981; padding: 12px 16px; border-radius: 4px; margin-bottom: 20px;">
                         <strong style="color: #10B981; font-size: 14px;">✅ Operational Delivery Verification Successful</strong>
-                        <p style="margin: 4px 0 0 0; font-size: 13px; color: #CBD5E1;">This test email confirms that DataGuard can successfully route real-time operational error alerts to your team members.</p>
+                        <p style="margin: 4px 0 0 0; font-size: 13px; color: #CBD5E1;">This test email confirms that DataGuard can successfully route operational error alerts to your team members.</p>
                     </div>
                     <table style="width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 20px;">
                         <tr>
-                            <td style="padding: 8px 0; color: #64748B; width: 140px;">Timestamp:</td>
-                            <td style="padding: 8px 0; color: #F1F5F9; font-weight: 600;">{now_str}</td>
+                            <td style="padding: 8px 0; color: #64748B; width: 140px;">Project:</td>
+                            <td style="padding: 8px 0; color: #F1F5F9; font-weight: 600;">DataGuard</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748B;">Timestamp:</td>
+                            <td style="padding: 8px 0; color: #F1F5F9;">{now_str}</td>
                         </tr>
                         <tr>
                             <td style="padding: 8px 0; color: #64748B;">SMTP Host:</td>
                             <td style="padding: 8px 0; color: #F1F5F9;">{config['smtp_host']}:{config['smtp_port']}</td>
                         </tr>
                         <tr>
-                            <td style="padding: 8px 0; color: #64748B;">Transport Mode:</td>
+                            <td style="padding: 8px 0; color: #64748B;">Delivery Mode:</td>
                             <td style="padding: 8px 0; color: {'#00C9FF' if config['mock_mode'] else '#10B981'}; font-weight: 600;">
-                                {'🧪 Sandbox / Simulated Delivery (Mock)' if config['mock_mode'] else '✉️ Live SMTP Production (TLS 587)'}
+                                {'🧪 SIMULATED DELIVERY (Sandbox Mode)' if config['mock_mode'] else '✉️ REAL EMAIL DELIVERY (Live SMTP 587)'}
                             </td>
-                        </tr>
-                        <tr>
-                            <td style="padding: 8px 0; color: #64748B;">Target Team:</td>
-                            <td style="padding: 8px 0; color: #CBD5E1;">{len(recipients)} recipient(s)</td>
                         </tr>
                     </table>
                     <div style="text-align: center; margin-top: 25px;">
@@ -359,13 +370,13 @@ class EmailNotificationService:
                     </div>
                 </div>
                 <div style="background-color: #0A0F1E; padding: 14px 24px; text-align: center; border-top: 1px solid rgba(255,255,255,0.06); font-size: 11px; color: #64748B;">
-                    DataGuard Intelligent Pipeline Reliability Platform · Automated Alerting Subsystem
+                    DataGuard Intelligent Pipeline Reliability Platform · Team Alerting Subsystem
                 </div>
             </div>
         </body>
         </html>
         """
-        plain_body = f"DataGuard Test Notification ({mode_label}) - Delivery verified to {len(recipients)} recipients at {now_str}."
+        plain_body = f"DataGuard Test Notification ({mode_label}) - Project: DataGuard - Timestamp: {now_str}"
 
         return self._dispatch_email(
             subject=subject,
@@ -376,6 +387,19 @@ class EmailNotificationService:
             pipeline_id="system_health_check",
             severity="INFO",
             config=config,
+        )
+
+    def send_sample_incident_alert(self) -> Dict[str, Any]:
+        """Triggers a realistic high-severity sample incident alert across all configured team recipients."""
+        return self.send_incident_alert(
+            incident_code="INC-ALERT-VERIFY",
+            pipeline_id="crm_customers_etl",
+            severity="P1",
+            title="CRITICAL: Schema Contract Breach & Data Ingestion Failure",
+            root_cause="Upstream API modified schema: column 'customer_id' was dropped/renamed, causing 100% extraction failure.",
+            downstream_impact="Financial Data Mart (warehouse_finance_mart) ingestion halted. Downstream BI reports stale.",
+            recommended_action="1. Authorize emergency rollback in DataGuard Console. 2. Quarantine invalid batches. 3. Engage upstream API team.",
+            dashboard_url="http://localhost:8501",
         )
 
     def _dispatch_email(
@@ -389,75 +413,87 @@ class EmailNotificationService:
         severity: str,
         config: Dict[str, Any],
     ) -> Dict[str, Any]:
-        """Dispatches an alert via Real SMTP (with retry) or records a simulated Mock dispatch."""
-        recipients_json = json.dumps(recipients)
+        """Dispatches an alert individually to each recipient via Real SMTP or Sandbox Simulation."""
+        valid_recipients = [r.strip() for r in recipients if r and r.strip()]
 
-        if not recipients:
+        if not valid_recipients:
             error_msg = "No recipients configured."
-            self.repo.log_notification(severity, recipients_json, subject, "FAILED", incident_code, pipeline_id, error_msg)
-            return {"status": "FAILED", "error": error_msg}
+            self.repo.log_notification(severity, "[]", subject, "FAILED", incident_code, pipeline_id, error_msg)
+            return {"status": "FAILED", "error": error_msg, "recipient_results": []}
 
-        # ── 1. MOCK / SANDBOX MODE ──────────────────────────────────────────
-        # When mock_mode is explicitly enabled, we record MOCK_DISPATCHED (never 'SENT')
+        # ── 1. SANDBOX / MOCK MODE: SIMULATED DELIVERY ───────────────────────
         if config["mock_mode"]:
-            self.repo.log_notification(
-                severity=severity,
-                recipients_json=recipients_json,
-                subject=subject,
-                status="MOCK_DISPATCHED",
-                incident_code=incident_code,
-                pipeline_id=pipeline_id,
-                channel="EMAIL (MOCK/SANDBOX)",
-            )
+            recipient_results = []
+            for r in valid_recipients:
+                self.repo.log_notification(
+                    severity=severity,
+                    recipients_json=json.dumps([r]),
+                    subject=subject,
+                    status="SIMULATED",
+                    incident_code=incident_code,
+                    pipeline_id=pipeline_id,
+                    channel="EMAIL (SIMULATED)",
+                    recipient=r,
+                )
+                recipient_results.append({
+                    "recipient": r,
+                    "status": "SIMULATED",
+                    "mode": "SIMULATED DELIVERY",
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                })
             return {
-                "status": "MOCK_DISPATCHED",
-                "mode": "MOCK",
-                "recipients_count": len(recipients),
-                "recipients": recipients,
+                "status": "SIMULATED",
+                "mode": "SIMULATED DELIVERY",
+                "recipients_count": len(valid_recipients),
+                "attempted": len(valid_recipients),
+                "simulated_count": len(valid_recipients),
+                "sent_count": 0,
+                "failed_count": 0,
+                "recipients": valid_recipients,
+                "recipient_results": recipient_results,
                 "subject": subject,
-                "message": f"Simulated mock notification generated for {len(recipients)} team member(s) [Sandbox Mode].",
+                "message": f"SIMULATED DELIVERY: Generated {len(valid_recipients)} simulated notification(s) in Sandbox Mode.",
             }
 
         # ── 2. REAL SMTP PRODUCTION MODE ────────────────────────────────────
-        # In live mode, credentials are required. Do NOT silently fall back to mock!
+        # In live mode, credentials are required. Never silently fall back to simulated delivery!
         if not config["smtp_password"] or not config["smtp_username"]:
             err_msg = (
-                "Live SMTP delivery failed: Missing SMTP credentials. "
-                "Please configure DATAGUARD_SMTP_USER and DATAGUARD_SMTP_PASSWORD, "
-                "or enter an App Password in the Settings panel."
+                "Live SMTP delivery failed: Missing credentials. "
+                "Configure DATAGUARD_SMTP_USER and DATAGUARD_SMTP_PASSWORD, "
+                "or enter your Google App Password in Settings."
             )
-            self.repo.log_notification(
-                severity=severity,
-                recipients_json=recipients_json,
-                subject=subject,
-                status="FAILED",
-                incident_code=incident_code,
-                pipeline_id=pipeline_id,
-                error_message=err_msg,
-                channel="EMAIL (SMTP)",
-            )
+            recipient_results = []
+            for r in valid_recipients:
+                self.repo.log_notification(
+                    severity=severity,
+                    recipients_json=json.dumps([r]),
+                    subject=subject,
+                    status="FAILED",
+                    incident_code=incident_code,
+                    pipeline_id=pipeline_id,
+                    error_message=err_msg,
+                    channel="EMAIL (SMTP)",
+                    recipient=r,
+                )
+                recipient_results.append({"recipient": r, "status": "FAILED", "error": err_msg})
             return {
                 "status": "FAILED",
                 "mode": "LIVE_SMTP",
                 "error": err_msg,
-                "recipients": recipients,
+                "attempted": len(valid_recipients),
+                "sent_count": 0,
+                "failed_count": len(valid_recipients),
+                "recipients": valid_recipients,
+                "recipient_results": recipient_results,
                 "message": err_msg,
             }
 
-        # Execute Live SMTP Transmission with Retry Handling (up to 3 attempts)
-        max_attempts = 3
-        last_error = None
-
-        for attempt in range(1, max_attempts + 1):
+        # Connect to SMTP server with retry (up to 3 attempts)
+        server = None
+        connect_error = None
+        for conn_attempt in range(1, 4):
             try:
-                msg = MIMEMultipart("alternative")
-                msg["Subject"] = subject
-                msg["From"] = f"{config['sender_name']} <{config['sender_email']}>"
-                msg["To"] = ", ".join(recipients)
-
-                msg.attach(MIMEText(plain_content, "plain", "utf-8"))
-                msg.attach(MIMEText(html_content, "html", "utf-8"))
-
                 if config["smtp_use_ssl"]:
                     server = smtplib.SMTP_SSL(config["smtp_host"], config["smtp_port"], timeout=12)
                 else:
@@ -469,69 +505,136 @@ class EmailNotificationService:
                     server.ehlo()
 
                 server.login(config["smtp_username"], config["smtp_password"])
-                server.sendmail(config["sender_email"], recipients, msg.as_string())
-                server.quit()
+                connect_error = None
+                break
+            except smtplib.SMTPAuthenticationError as e:
+                clean_err = self._sanitize_error(str(e), config["smtp_password"])
+                connect_error = (
+                    f"SMTP Authentication Error: {clean_err}. "
+                    "Ensure you use a 16-character Google App Password (https://myaccount.google.com/apppasswords)."
+                )
+                break  # Non-retriable auth error
+            except Exception as e:
+                connect_error = self._sanitize_error(str(e), config["smtp_password"])
+                if conn_attempt < 3:
+                    time.sleep(1.0 * conn_attempt)
 
-                # Record successful delivery
+        # If connection or auth failed completely:
+        if connect_error or server is None:
+            err_msg = f"Failed to establish SMTP session: {connect_error}"
+            recipient_results = []
+            for r in valid_recipients:
                 self.repo.log_notification(
                     severity=severity,
-                    recipients_json=recipients_json,
+                    recipients_json=json.dumps([r]),
                     subject=subject,
-                    status="SMTP_ACCEPTED",
+                    status="FAILED",
                     incident_code=incident_code,
                     pipeline_id=pipeline_id,
+                    error_message=err_msg,
                     channel="EMAIL (SMTP)",
+                    recipient=r,
                 )
-                return {
-                    "status": "SMTP_ACCEPTED",
-                    "mode": "LIVE_SMTP",
-                    "recipients_count": len(recipients),
-                    "recipients": recipients,
-                    "subject": subject,
-                    "attempt": attempt,
-                    "message": f"SMTP accepted message for delivery to {len(recipients)} team member(s) via {config['smtp_host']}:{config['smtp_port']} (Attempt {attempt}/{max_attempts}).",
-                }
+                recipient_results.append({"recipient": r, "status": "FAILED", "error": err_msg})
+            return {
+                "status": "FAILED",
+                "mode": "LIVE_SMTP",
+                "error": err_msg,
+                "attempted": len(valid_recipients),
+                "sent_count": 0,
+                "failed_count": len(valid_recipients),
+                "recipients": valid_recipients,
+                "recipient_results": recipient_results,
+                "message": err_msg,
+            }
 
-            except smtplib.SMTPAuthenticationError as e:
-                # Authentication failures will not succeed on retry; exit immediately
-                err = self._sanitize_error(str(e), config["smtp_password"])
-                last_error = (
-                    f"SMTP Authentication Error: {err}. "
-                    "For Gmail, use a 16-character Google App Password (https://myaccount.google.com/apppasswords). "
-                    "Your regular Google account password is rejected with '535 5.7.8 BadCredentials'."
-                )
-                break
+        # Send individual emails to each team member separately
+        recipient_results = []
+        try:
+            for r in valid_recipients:
+                try:
+                    msg = MIMEMultipart("alternative")
+                    msg["Subject"] = subject
+                    msg["From"] = f"{config['sender_name']} <{config['sender_email']}>"
+                    msg["To"] = r
 
-            except (smtplib.SMTPConnectError, ConnectionRefusedError, socket.timeout, TimeoutError, OSError) as e:
-                err = self._sanitize_error(str(e), config["smtp_password"])
-                last_error = f"SMTP Connection/Network Error on attempt {attempt}/{max_attempts}: {err}"
-                if attempt < max_attempts:
-                    time.sleep(1.0 * attempt)
+                    msg.attach(MIMEText(plain_content, "plain", "utf-8"))
+                    msg.attach(MIMEText(html_content, "html", "utf-8"))
 
-            except Exception as e:
-                err = self._sanitize_error(str(e), config["smtp_password"])
-                last_error = f"SMTP Transmission Error on attempt {attempt}/{max_attempts}: {err}"
-                if attempt < max_attempts:
-                    time.sleep(1.0 * attempt)
+                    # Real transmission: server accepts message
+                    server.sendmail(config["sender_email"], [r], msg.as_string())
 
-        # Log failed delivery
-        clean_err = self._sanitize_error(str(last_error), config.get("smtp_password"))
-        self.repo.log_notification(
-            severity=severity,
-            recipients_json=recipients_json,
-            subject=subject,
-            status="FAILED",
-            incident_code=incident_code,
-            pipeline_id=pipeline_id,
-            error_message=clean_err,
-            channel="EMAIL (SMTP)",
-        )
+                    # ONLY mark as SENT after SMTP server accepts the message
+                    self.repo.log_notification(
+                        severity=severity,
+                        recipients_json=json.dumps([r]),
+                        subject=subject,
+                        status="SENT",
+                        incident_code=incident_code,
+                        pipeline_id=pipeline_id,
+                        channel="EMAIL (SMTP)",
+                        recipient=r,
+                    )
+                    recipient_results.append({
+                        "recipient": r,
+                        "status": "SENT",
+                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    })
+
+                except smtplib.SMTPRecipientsRefused as e:
+                    recip_err = f"Invalid recipient address refused by SMTP server: {r}"
+                    self.repo.log_notification(
+                        severity=severity,
+                        recipients_json=json.dumps([r]),
+                        subject=subject,
+                        status="FAILED",
+                        incident_code=incident_code,
+                        pipeline_id=pipeline_id,
+                        error_message=recip_err,
+                        channel="EMAIL (SMTP)",
+                        recipient=r,
+                    )
+                    recipient_results.append({"recipient": r, "status": "FAILED", "error": recip_err})
+
+                except Exception as e:
+                    item_err = self._sanitize_error(str(e), config["smtp_password"])
+                    self.repo.log_notification(
+                        severity=severity,
+                        recipients_json=json.dumps([r]),
+                        subject=subject,
+                        status="FAILED",
+                        incident_code=incident_code,
+                        pipeline_id=pipeline_id,
+                        error_message=item_err,
+                        channel="EMAIL (SMTP)",
+                        recipient=r,
+                    )
+                    recipient_results.append({"recipient": r, "status": "FAILED", "error": item_err})
+        finally:
+            try:
+                server.quit()
+            except Exception:
+                pass
+
+        sent_count = sum(1 for res in recipient_results if res["status"] == "SENT")
+        failed_count = sum(1 for res in recipient_results if res["status"] == "FAILED")
+        overall_status = "SENT" if sent_count == len(valid_recipients) else ("PARTIAL" if sent_count > 0 else "FAILED")
+
         return {
-            "status": "FAILED",
+            "status": overall_status,
             "mode": "LIVE_SMTP",
-            "error": clean_err,
-            "recipients": recipients,
-            "message": f"Failed to deliver email after {max_attempts} attempt(s): {clean_err}",
+            "attempted": len(valid_recipients),
+            "sent_count": sent_count,
+            "failed_count": failed_count,
+            "recipients_count": len(valid_recipients),
+            "recipients": valid_recipients,
+            "recipient_results": recipient_results,
+            "subject": subject,
+            "message": (
+                f"SMTP delivered to {sent_count}/{len(valid_recipients)} recipient(s) via {config['smtp_host']}:{config['smtp_port']}."
+                if sent_count > 0
+                else f"All {failed_count} recipient deliveries failed via {config['smtp_host']}."
+            ),
         }
 
     def _build_incident_html(
@@ -556,9 +659,9 @@ class EmailNotificationService:
         color, bg_color, badge_text = sev_colors.get(severity.upper(), ("#F43F5E", "rgba(244, 63, 94, 0.15)", severity))
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC")
         mode_pill = (
-            '<span style="background:rgba(0,201,255,0.15);color:#00C9FF;border:1px solid #00C9FF;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:700;margin-left:8px;">MOCK SIMULATION</span>'
+            '<span style="background:rgba(0,201,255,0.15);color:#00C9FF;border:1px solid #00C9FF;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:700;margin-left:8px;">SIMULATED DELIVERY</span>'
             if is_mock
-            else '<span style="background:rgba(16,185,129,0.15);color:#10B981;border:1px solid #10B981;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:700;margin-left:8px;">LIVE SMTP</span>'
+            else '<span style="background:rgba(16,185,129,0.15);color:#10B981;border:1px solid #10B981;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:700;margin-left:8px;">LIVE EMAIL (SMTP)</span>'
         )
 
         return f"""
@@ -578,7 +681,7 @@ class EmailNotificationService:
                         <tr>
                             <td>
                                 <h1 style="margin: 0; color: #00C9FF; font-size: 22px; font-weight: 700; letter-spacing: -0.5px;">🛡️ DataGuard Alert Center</h1>
-                                <p style="margin: 4px 0 0 0; color: #94A3B8; font-size: 13px;">Intelligent Pipeline Reliability & Recovery Guide {mode_pill}</p>
+                                <p style="margin: 4px 0 0 0; color: #94A3B8; font-size: 13px;">Project: <strong>DataGuard</strong> &nbsp;·&nbsp; {mode_pill}</p>
                             </td>
                             <td style="text-align: right;">
                                 <span style="background-color: {bg_color}; color: {color}; border: 1px solid {color}; padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: 700; display: inline-block;">
@@ -592,22 +695,26 @@ class EmailNotificationService:
                 <!-- Alert Headline -->
                 <div style="padding: 24px; border-bottom: 1px solid rgba(255, 255, 255, 0.06);">
                     <h2 style="margin: 0 0 8px 0; color: #F1F5F9; font-size: 18px; font-weight: 600;">{title}</h2>
-                    <p style="margin: 0; color: #94A3B8; font-size: 13px;">Pipeline ID: <strong style="color: #00C9FF;">{pipeline_id}</strong> &nbsp;·&nbsp; Ticket: <strong style="color: #CBD5E1;">{incident_code}</strong></p>
+                    <p style="margin: 0; color: #94A3B8; font-size: 13px;">Pipeline: <strong style="color: #00C9FF;">{pipeline_id}</strong> &nbsp;·&nbsp; Incident ID: <strong style="color: #CBD5E1;">{incident_code}</strong></p>
                 </div>
 
                 <!-- Diagnostic Details Table -->
                 <div style="padding: 24px;">
                     <table style="width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 24px;">
                         <tr style="border-bottom: 1px solid rgba(255,255,255,0.06);">
-                            <td style="padding: 10px 0; color: #64748B; width: 150px; font-weight: 500;">Detected At</td>
+                            <td style="padding: 10px 0; color: #64748B; width: 160px; font-weight: 500;">Timestamp</td>
                             <td style="padding: 10px 0; color: #F1F5F9; font-weight: 600;">{now_str}</td>
                         </tr>
                         <tr style="border-bottom: 1px solid rgba(255,255,255,0.06);">
-                            <td style="padding: 10px 0; color: #64748B; font-weight: 500;">Root Cause Summary</td>
+                            <td style="padding: 10px 0; color: #64748B; font-weight: 500;">Error Severity</td>
+                            <td style="padding: 10px 0; color: {color}; font-weight: 700;">{severity}</td>
+                        </tr>
+                        <tr style="border-bottom: 1px solid rgba(255,255,255,0.06);">
+                            <td style="padding: 10px 0; color: #64748B; font-weight: 500;">Root Cause / Description</td>
                             <td style="padding: 10px 0; color: #FCA5A5; line-height: 1.5;">{root_cause}</td>
                         </tr>
                         <tr style="border-bottom: 1px solid rgba(255,255,255,0.06);">
-                            <td style="padding: 10px 0; color: #64748B; font-weight: 500;">Downstream Blast Radius</td>
+                            <td style="padding: 10px 0; color: #64748B; font-weight: 500;">Downstream Impact</td>
                             <td style="padding: 10px 0; color: #FDE047; line-height: 1.5;">{downstream_impact}</td>
                         </tr>
                         <tr>
@@ -618,7 +725,7 @@ class EmailNotificationService:
 
                     <!-- CTA Button -->
                     <div style="background-color: #0F172A; border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 20px; text-align: center;">
-                        <p style="margin: 0 0 16px 0; font-size: 13px; color: #94A3B8;">Immediate operator authorization or rollback required to restore pipeline SLA.</p>
+                        <p style="margin: 0 0 16px 0; font-size: 13px; color: #94A3B8;">Immediate operator authorization or recovery required in DataGuard.</p>
                         <a href="{dashboard_url}" style="background: linear-gradient(90deg, #00C9FF 0%, #7C3AED 100%); color: #FFFFFF; text-decoration: none; padding: 12px 28px; border-radius: 8px; font-weight: 600; font-size: 14px; display: inline-block; box-shadow: 0 4px 14px rgba(0,201,255,0.3);">
                             Open Incident in DataGuard Console →
                         </a>
@@ -628,7 +735,7 @@ class EmailNotificationService:
                 <!-- Footer -->
                 <div style="background-color: #0A0F1E; padding: 16px 24px; text-align: center; border-top: 1px solid rgba(255,255,255,0.06); font-size: 11px; color: #64748B;">
                     This is an automated operational alert generated by DataGuard. Do not reply directly to this email.<br>
-                    Configured recipients: 5 team members · Duplicate suppression active.
+                    Dispatched individually to configured team recipients.
                 </div>
             </div>
         </body>

@@ -171,9 +171,10 @@ CREATE TABLE IF NOT EXISTS notification_logs (
     severity TEXT NOT NULL,
     recipients_json TEXT NOT NULL,
     subject TEXT NOT NULL,
-    status TEXT NOT NULL CHECK(status IN ('SENT', 'SMTP_ACCEPTED', 'MOCK_DISPATCHED', 'FAILED', 'SUPPRESSED_COOLDOWN', 'SUPPRESSED_SEVERITY')),
+    status TEXT NOT NULL CHECK(status IN ('SENT', 'SMTP_ACCEPTED', 'MOCK_DISPATCHED', 'SIMULATED', 'FAILED', 'SUPPRESSED_COOLDOWN', 'SUPPRESSED_SEVERITY')),
     error_message TEXT,
-    channel TEXT NOT NULL DEFAULT 'EMAIL'
+    channel TEXT NOT NULL DEFAULT 'EMAIL',
+    recipient TEXT
 );
 
 -- Performance Indexes
@@ -332,6 +333,7 @@ class NotificationLog:
     pipeline_id: Optional[str] = None
     error_message: Optional[str] = None
     channel: str = "EMAIL"
+    recipient: Optional[str] = None
     timestamp: Optional[str] = None
     id: Optional[int] = None
 
@@ -350,15 +352,24 @@ def init_db() -> None:
 
 def _migrate_notification_logs_if_needed(conn: sqlite3.Connection) -> None:
     """Migrates notification_logs to expand CHECK constraint for real SMTP vs Mock statuses if needed."""
+    # Ensure recipient column exists
     try:
-        # Check if table allows 'SMTP_ACCEPTED'
+        conn.execute("SELECT recipient FROM notification_logs LIMIT 1;")
+    except sqlite3.OperationalError:
+        try:
+            conn.execute("ALTER TABLE notification_logs ADD COLUMN recipient TEXT;")
+        except Exception:
+            pass
+
+    try:
+        # Check if table allows 'SIMULATED' and 'SENT'
         conn.execute(
-            "INSERT INTO notification_logs (id, timestamp, severity, recipients_json, subject, status) "
-            "VALUES (-999, '2000-01-01 00:00:00', 'INFO', '[]', '__migration_probe__', 'SMTP_ACCEPTED');"
+            "INSERT INTO notification_logs (id, timestamp, severity, recipients_json, subject, status, recipient) "
+            "VALUES (-999, '2000-01-01 00:00:00', 'INFO', '[]', '__migration_probe__', 'SIMULATED', 'test@example.com');"
         )
         conn.execute("DELETE FROM notification_logs WHERE id = -999;")
     except sqlite3.IntegrityError:
-        # CHECK constraint rejected 'SMTP_ACCEPTED'; perform safe table migration
+        # CHECK constraint rejected 'SIMULATED'; perform safe table migration
         conn.execute("CREATE TABLE IF NOT EXISTS notification_logs_backup AS SELECT * FROM notification_logs;")
         conn.execute("DROP TABLE notification_logs;")
         conn.execute(
@@ -370,12 +381,14 @@ def _migrate_notification_logs_if_needed(conn: sqlite3.Connection) -> None:
                 severity TEXT NOT NULL,
                 recipients_json TEXT NOT NULL,
                 subject TEXT NOT NULL,
-                status TEXT NOT NULL CHECK(status IN ('SENT', 'SMTP_ACCEPTED', 'MOCK_DISPATCHED', 'FAILED', 'SUPPRESSED_COOLDOWN', 'SUPPRESSED_SEVERITY')),
+                status TEXT NOT NULL CHECK(status IN ('SENT', 'SMTP_ACCEPTED', 'MOCK_DISPATCHED', 'SIMULATED', 'FAILED', 'SUPPRESSED_COOLDOWN', 'SUPPRESSED_SEVERITY')),
                 error_message TEXT,
-                channel TEXT NOT NULL DEFAULT 'EMAIL'
+                channel TEXT NOT NULL DEFAULT 'EMAIL',
+                recipient TEXT
             );"""
         )
-        conn.execute("INSERT INTO notification_logs SELECT * FROM notification_logs_backup;")
+        conn.execute("INSERT INTO notification_logs (id, timestamp, incident_code, pipeline_id, severity, recipients_json, subject, status, error_message, channel) "
+                     "SELECT id, timestamp, incident_code, pipeline_id, severity, recipients_json, subject, status, error_message, channel FROM notification_logs_backup;")
         conn.execute("DROP TABLE notification_logs_backup;")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_notif_logs_incident ON notification_logs(incident_code);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_notif_logs_pipeline ON notification_logs(pipeline_id);")

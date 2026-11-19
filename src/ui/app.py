@@ -1501,24 +1501,30 @@ elif "Email" in page:
                     form_recipients.append(r_email)
 
                 st.markdown("")
-                save_col, conn_col, test_col = st.columns([1, 1.3, 1.1])
+                bcol1, bcol2, bcol3, bcol4 = st.columns([1, 1.3, 1.1, 1.2])
 
-                with save_col:
+                with bcol1:
                     save_submitted = st.form_submit_button(
                         "💾 Save Settings",
                         type="primary",
                         disabled=not is_admin,
                         use_container_width=True,
                     )
-                with conn_col:
+                with bcol2:
                     conn_test_submitted = st.form_submit_button(
-                        "🔌 Test SMTP Auth & Handshake",
+                        "🔌 Test SMTP Connection",
                         disabled=not is_engineer,
                         use_container_width=True,
                     )
-                with test_col:
+                with bcol3:
                     test_submitted = st.form_submit_button(
                         "📨 Send Test Email",
+                        disabled=not is_engineer,
+                        use_container_width=True,
+                    )
+                with bcol4:
+                    alert_test_submitted = st.form_submit_button(
+                        "🚨 Send Incident Alert",
                         disabled=not is_engineer,
                         use_container_width=True,
                     )
@@ -1547,14 +1553,14 @@ elif "Email" in page:
                             )
                             st.success(
                                 f"✅ **Settings saved** — Configuration updated for {len(valid_recipients)} recipient(s). "
-                                f"Mode: {'🧪 Mock / Sandbox' if form_mock else '✉️ LIVE PRODUCTION SMTP'}."
+                                f"Mode: {'🧪 SIMULATED DELIVERY (Sandbox Mode)' if form_mock else '✉️ REAL EMAIL DELIVERY (Live SMTP 587)'}."
                             )
                             st.rerun()
                         except Exception as e:
                             st.error(f"❌ Failed to save settings: {e}")
 
                 if conn_test_submitted and is_engineer:
-                    with st.spinner("Connecting to SMTP server and verifying authentication..."):
+                    with st.spinner("Testing live connection & authentication with smtp.gmail.com:587..."):
                         conn_res = email_service.test_smtp_connection(
                             smtp_host=form_smtp_host.strip(),
                             smtp_port=int(form_smtp_port),
@@ -1565,49 +1571,85 @@ elif "Email" in page:
                         )
                     if conn_res.get("success"):
                         st.success(
-                            f"✅ **SMTP Authentication & Handshake Verified!** Successfully connected and authenticated with "
+                            f"✅ **SMTP Authentication & Connection Verified!** Successfully connected and authenticated with "
                             f"`{conn_res['host']}:{conn_res['port']}` as `{conn_res['user']}`."
                         )
                     else:
-                        st.error(f"❌ **Connection / Authentication Failed:** {conn_res.get('message')}")
+                        st.error(f"❌ **SMTP Connection / Authentication Failed:** {conn_res.get('message')}")
                         if conn_res.get("hint"):
-                            st.info(f"💡 **Troubleshooting Guide:**\n\n{conn_res['hint']}")
+                            st.info(f"💡 **Guidance:**\n\n{conn_res['hint']}")
 
                 if test_submitted and is_engineer:
-                    with st.spinner("Dispatching test email to all recipients..."):
+                    with st.spinner("Dispatching test emails individually to all 5 team recipients..."):
                         result = email_service.send_test_email()
-                    if result.get("status") == "SMTP_ACCEPTED":
+                    if result.get("status") == "SENT":
                         st.success(
-                            f"✅ **SMTP Accepted for Delivery** [✉️ Live SMTP Production] — "
-                            f"Message accepted for transmission to {result.get('recipients_count', 0)} recipient(s) "
-                            f"via `{cfg.get('smtp_host')}` (Attempt {result.get('attempt', 1)})."
+                            f"✅ **REAL EMAIL DELIVERED VIA SMTP** — "
+                            f"Accepted by `{cfg.get('smtp_host')}` for delivery to {result.get('sent_count')} team member(s)."
                         )
-                        with st.expander("📋 Transmission Telemetry"):
-                            st.write(f"**Subject:** `{result.get('subject', '')}`")
-                            st.write(f"**Delivery Attempt:** `{result.get('attempt', 1)}`")
-                            for r in result.get("recipients", []):
-                                st.markdown(f"• `{r}`")
-                    elif result.get("status") == "MOCK_DISPATCHED":
+                    elif result.get("status") == "SIMULATED":
                         st.info(
-                            f"🧪 **Mock Notification Generated** [Sandbox Mode] — "
-                            f"Simulated alert recorded for {result.get('recipients_count', 0)} recipient(s). "
-                            f"*(No real email was sent because Mock Mode is enabled. Uncheck Mock Mode above to enable real delivery)*."
+                            f"🧪 **SIMULATED DELIVERY (Sandbox Mode)** — "
+                            f"Recorded simulated test alerts for {result.get('simulated_count')} team member(s). "
+                            f"*(Sandbox Mode is ON. Turn OFF Sandbox Mode in settings to send real emails)*."
                         )
-                        with st.expander("📋 Mock Telemetry"):
-                            st.write(f"**Subject:** `{result.get('subject', '')}`")
-                            for r in result.get("recipients", []):
-                                st.markdown(f"• `{r}`")
-                    elif result.get("status") == "DISABLED":
-                        st.warning("⚠️ Email notifications are currently disabled. Enable them in settings first.")
+                    elif result.get("status") == "PARTIAL":
+                        st.warning(
+                            f"⚠️ **Partial Delivery:** {result.get('sent_count')} sent, {result.get('failed_count')} failed."
+                        )
                     else:
                         st.error(f"❌ **Delivery Failed:** {result.get('error', result.get('message', 'Unknown error'))}")
+
+                    if result.get("recipient_results"):
+                        with st.expander("📋 Per-Recipient Delivery Status Breakdown", expanded=True):
+                            for r_item in result["recipient_results"]:
+                                r_status = r_item.get("status")
+                                if r_status == "SENT":
+                                    st.markdown(f"• `{r_item['recipient']}` ➜ <span style='color:#10B981;font-weight:700;'>✓ SENT (Accepted by SMTP)</span>", unsafe_allow_html=True)
+                                elif r_status == "SIMULATED":
+                                    st.markdown(f"• `{r_item['recipient']}` ➜ <span style='color:#00C9FF;font-weight:700;'>🧪 SIMULATED DELIVERY</span>", unsafe_allow_html=True)
+                                else:
+                                    st.markdown(f"• `{r_item['recipient']}` ➜ <span style='color:#F43F5E;font-weight:700;'>✗ FAILED: {r_item.get('error','Delivery rejected')}</span>", unsafe_allow_html=True)
+
+                if alert_test_submitted and is_engineer:
+                    with st.spinner("Dispatching sample high-priority P1 incident alert to all team members..."):
+                        alert_res = email_service.send_sample_incident_alert()
+                    if alert_res.get("status") == "SENT":
+                        st.success(
+                            f"🚨 **LIVE INCIDENT ALERT DELIVERED VIA SMTP!** — "
+                            f"Accepted for {alert_res.get('sent_count')} team member(s) via `{cfg.get('smtp_host')}`."
+                        )
+                    elif alert_res.get("status") == "SIMULATED":
+                        st.info(
+                            f"🧪 **SIMULATED INCIDENT ALERT (Sandbox Mode)** — "
+                            f"Simulated alert recorded for {alert_res.get('simulated_count')} team member(s). "
+                            f"*(Turn OFF Sandbox Mode to deliver real alerts to inboxes)*."
+                        )
+                    elif alert_res.get("status") == "SUPPRESSED_COOLDOWN":
+                        st.warning(f"⊘ **Suppressed by Cooldown:** {alert_res.get('message')}")
+                    else:
+                        st.error(f"❌ **Incident Alert Failed:** {alert_res.get('error', alert_res.get('message'))}")
+
+                    if alert_res.get("recipient_results"):
+                        with st.expander("📋 Incident Alert Delivery Breakdown", expanded=True):
+                            for r_item in alert_res["recipient_results"]:
+                                r_status = r_item.get("status")
+                                if r_status == "SENT":
+                                    st.markdown(f"• `{r_item['recipient']}` ➜ <span style='color:#10B981;font-weight:700;'>✓ SENT</span>", unsafe_allow_html=True)
+                                elif r_status == "SIMULATED":
+                                    st.markdown(f"• `{r_item['recipient']}` ➜ <span style='color:#00C9FF;font-weight:700;'>🧪 SIMULATED</span>", unsafe_allow_html=True)
+                                else:
+                                    st.markdown(f"• `{r_item['recipient']}` ➜ <span style='color:#F43F5E;font-weight:700;'>✗ FAILED: {r_item.get('error','Rejected')}</span>", unsafe_allow_html=True)
 
         with col_set_r:
             st.subheader("📊 Notification Status")
 
+            # Accurate metrics using repo.get_notification_metrics()
+            metrics = repo.get_notification_metrics()
+
             # Live status card
             enabled_badge = "🟢 **ACTIVE**" if cfg.get("is_enabled", True) else "🔴 **DISABLED**"
-            mode_badge = "🧪 Sandbox / Mock Mode (Simulated)" if cfg.get("mock_mode", True) else "✉️ LIVE PRODUCTION SMTP (Real Delivery)"
+            mode_badge = "🧪 SIMULATED DELIVERY (Sandbox Mode)" if cfg.get("mock_mode", True) else "✉️ REAL EMAIL DELIVERY (Live SMTP 587)"
             pwd_configured = bool(cfg.get("smtp_password"))
             pwd_display = "●●●●●●●● *(Protected)*" if pwd_configured else "*None (Required for Live SMTP)*"
 
@@ -1618,43 +1660,32 @@ elif "Email" in page:
                     <div style="font-size: 11px; color: #64748B; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px;">System Status</div>
                     <div style="font-size: 20px; font-weight: 700; color: #F1F5F9; margin-bottom: 4px;">{enabled_badge}</div>
                     <div style="font-size: 13px; color: #94A3B8; margin-top: 8px;">Transport: <strong style="color:{'#00C9FF' if cfg.get('mock_mode') else '#10B981'};">{mode_badge}</strong></div>
-                    <div style="font-size: 13px; color: #94A3B8;">SMTP Server: <code style="color:#00C9FF;">{cfg.get('smtp_host','—')}:{cfg.get('smtp_port','—')}</code></div>
+                    <div style="font-size: 13px; color: #94A3B8;">SMTP Server: <code style="color:#00C9FF;">{cfg.get('smtp_host','—')}:{cfg.get('smtp_port','—')} (STARTTLS)</code></div>
                     <div style="font-size: 13px; color: #94A3B8;">Username: <code style="color:#CBD5E1;">{cfg.get('smtp_username') if cfg.get('smtp_username') else '(Not Set)'}</code></div>
                     <div style="font-size: 13px; color: #94A3B8;">App Password: <span style="color:#A7F3D0;">{pwd_display}</span></div>
                     <div style="font-size: 13px; color: #94A3B8;">Recipients: <strong style="color:#F1F5F9;">{len([r for r in recipients_list if r])}</strong> / 5 configured</div>
                     <div style="font-size: 13px; color: #94A3B8;">Cooldown: <strong style="color:#F1F5F9;">{cfg.get('cooldown_minutes', 30)} min</strong></div>
-                    <div style="font-size: 13px; color: #94A3B8;">Threshold: <strong style="color:#F1F5F9;">{cfg.get('severity_threshold', 'ALL')}</strong></div>
+                    <div style="font-size: 13px; color: #94A3B8;">Last Delivery: <strong style="color:#A7F3D0;">{metrics['last_delivery']}</strong></div>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
 
-            # Recent delivery stats
-            recent_logs = repo.get_recent_notification_logs(limit=100)
-            smtp_count = sum(1 for l in recent_logs if l.get("status") in ("SMTP_ACCEPTED", "SMTP_DELIVERED", "SENT"))
-            mock_count = sum(1 for l in recent_logs if l.get("status") in ("MOCK_DISPATCHED", "MOCK"))
-            failed_count = sum(1 for l in recent_logs if l.get("status") == "FAILED")
-            suppressed_count = sum(1 for l in recent_logs if "SUPPRESSED" in str(l.get("status", "")))
-            total_count = len(recent_logs)
-
-            st.metric("Total Notifications (All Time)", total_count)
+            # Verified delivery KPI metrics (Requirement 4)
+            st.metric("Emails Attempted", metrics["attempted"])
             m1, m2, m3, m4 = st.columns(4)
-            m1.metric("SMTP", smtp_count)
-            m2.metric("Mock", mock_count)
-            m3.metric("Failed", failed_count)
-            m4.metric("Suppressed", suppressed_count)
+            m1.metric("Sent (SMTP)", metrics["sent"], help="Emails verified and accepted by real SMTP server")
+            m2.metric("Failed", metrics["failed"], help="Delivery attempts rejected by SMTP server")
+            m3.metric("Simulated", metrics["simulated"], help="Simulated dispatches recorded in Sandbox Mode")
+            m4.metric("Last Sent", str(metrics["last_delivery"]).split(" ")[-1] if " " in str(metrics["last_delivery"]) else metrics["last_delivery"])
 
             st.markdown("---")
-            st.markdown("**🔑 Configured Recipients (5 slots)**")
+            st.markdown("**🔑 Configured Team Recipients (5 slots)**")
             configured_recipients = [r for r in recipients_list if r.strip()]
             if configured_recipients:
                 for i, r in enumerate(configured_recipients, 1):
-                    # Mask email for security (show first 3 chars + domain)
                     parts = r.split("@")
-                    if len(parts) == 2:
-                        masked = f"{parts[0][:3]}***@{parts[1]}"
-                    else:
-                        masked = r
+                    masked = f"{parts[0][:3]}***@{parts[1]}" if len(parts) == 2 else r
                     st.markdown(f"`{i}.` {masked}")
             else:
                 st.warning("No recipients configured yet.")
@@ -1686,7 +1717,17 @@ elif "Email" in page:
     # ═══════════════════════════════════════════════════════════════════
     with tab_history:
         st.subheader("📋 Notification Dispatch History")
-        st.caption("Audit trail of all alert dispatch attempts. Real deliveries, mock simulations, and failures are strictly distinguished.")
+        st.caption("Per-recipient audit trail. Real SMTP deliveries, simulated dispatches, and failures are recorded separately.")
+
+        hist_metrics = repo.get_notification_metrics()
+        hm1, hm2, hm3, hm4, hm5 = st.columns(5)
+        hm1.metric("Emails Attempted", hist_metrics["attempted"])
+        hm2.metric("Successfully Sent", hist_metrics["sent"])
+        hm3.metric("Emails Failed", hist_metrics["failed"])
+        hm4.metric("Emails Simulated", hist_metrics["simulated"])
+        hm5.metric("Last Delivery", str(hist_metrics["last_delivery"]).split(" ")[-1] if " " in str(hist_metrics["last_delivery"]) else hist_metrics["last_delivery"])
+
+        st.divider()
 
         refresh_col, limit_col = st.columns([1, 2])
         with limit_col:
@@ -1703,18 +1744,16 @@ elif "Email" in page:
         if not log_entries:
             st.info(
                 "📭 No notifications have been dispatched yet. "
-                "Trigger an incident simulation in the **Simulator Lab** or send a **Test Email** above."
+                "Trigger an incident alert or send a test email above."
             )
         else:
             # Build status badges using HTML
             def _status_badge(status: str) -> str:
                 status_upper = str(status).upper()
-                if status_upper in ("SMTP_ACCEPTED", "SMTP_DELIVERED"):
-                    return '<span style="background:rgba(16,185,129,0.15);color:#10B981;border:1px solid #10B981;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:700;">✓ SMTP ACCEPTED</span>'
-                elif status_upper in ("MOCK_DISPATCHED", "MOCK"):
-                    return '<span style="background:rgba(0,201,255,0.15);color:#00C9FF;border:1px solid #00C9FF;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:700;">🧪 MOCK NOTIFICATION</span>'
-                elif status_upper == "SENT":
-                    return '<span style="background:rgba(16,185,129,0.15);color:#10B981;border:1px solid #10B981;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:700;">✓ SENT (Legacy)</span>'
+                if status_upper in ("SENT", "SMTP_ACCEPTED", "SMTP_DELIVERED"):
+                    return '<span style="background:rgba(16,185,129,0.15);color:#10B981;border:1px solid #10B981;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:700;">✓ SENT (Real SMTP)</span>'
+                elif status_upper in ("SIMULATED", "MOCK_DISPATCHED", "MOCK"):
+                    return '<span style="background:rgba(0,201,255,0.15);color:#00C9FF;border:1px solid #00C9FF;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:700;">🧪 SIMULATED DELIVERY</span>'
                 elif status_upper == "FAILED":
                     return '<span style="background:rgba(244,63,94,0.15);color:#F43F5E;border:1px solid #F43F5E;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:700;">✗ DELIVERY FAILED</span>'
                 elif "SUPPRESSED" in status_upper:
@@ -1733,47 +1772,36 @@ elif "Email" in page:
                 color = sev_map.get(sev_upper, "#94A3B8")
                 return f'<span style="color:{color};font-weight:700;">{sev}</span>'
 
-            # Render table rows
-            header_cols = st.columns([2, 1.5, 1.5, 0.8, 1, 1.5, 1.2])
-            headers = ["Timestamp", "Pipeline ID", "Incident Code", "Severity", "Recipients", "Subject (truncated)", "Status"]
+            # Render table rows with individual recipient column
+            header_cols = st.columns([1.8, 1.8, 1.3, 0.8, 2, 1.4])
+            headers = ["Timestamp", "Recipient", "Incident ID", "Severity", "Subject", "Status"]
             for hc, hd in zip(header_cols, headers):
                 hc.markdown(f"**{hd}**")
             st.markdown('<hr style="border-color:rgba(255,255,255,0.08);margin:4px 0 8px 0;">', unsafe_allow_html=True)
 
             for entry in log_entries:
-                try:
-                    recip_count = len(_json.loads(entry.get("recipients_json", "[]")))
-                except Exception:
-                    recip_count = "?"
+                recip_display = entry.get("recipient")
+                if not recip_display:
+                    try:
+                        recips = _json.loads(entry.get("recipients_json", "[]"))
+                        recip_display = recips[0] if recips else "—"
+                    except Exception:
+                        recip_display = "—"
+
                 subject_trunc = str(entry.get("subject", ""))[:55] + ("…" if len(str(entry.get("subject", ""))) > 55 else "")
-                pipeline_display = str(entry.get("pipeline_id", "—"))[:20]
                 incident_display = str(entry.get("incident_code", "—"))[:18]
 
-                row_cols = st.columns([2, 1.5, 1.5, 0.8, 1, 1.5, 1.2])
+                row_cols = st.columns([1.8, 1.8, 1.3, 0.8, 2, 1.4])
                 row_cols[0].caption(str(entry.get("timestamp", "—")))
-                row_cols[1].caption(f"`{pipeline_display}`")
+                row_cols[1].caption(f"`{recip_display}`")
                 row_cols[2].caption(f"`{incident_display}`")
                 row_cols[3].markdown(_sev_badge(str(entry.get("severity", "—"))), unsafe_allow_html=True)
-                row_cols[4].caption(f"{recip_count} member(s)")
-                row_cols[5].caption(subject_trunc)
-                row_cols[6].markdown(_status_badge(str(entry.get("status", "—"))), unsafe_allow_html=True)
+                row_cols[4].caption(subject_trunc)
+                row_cols[5].markdown(_status_badge(str(entry.get("status", "—"))), unsafe_allow_html=True)
 
-                # Error detail expansion
                 if entry.get("error_message"):
-                    with st.expander(f"⚠️ Error detail — {entry.get('incident_code', '')}"):
+                    with st.expander(f"⚠️ Error detail — {entry.get('incident_code', '')} ({recip_display})"):
                         st.code(entry["error_message"], language="text")
-
-            st.divider()
-            # Summary stats row
-            stat_cols = st.columns(5)
-            stat_cols[0].metric("Total Logged", len(log_entries))
-            stat_cols[1].metric("SMTP Accepted", sum(1 for e in log_entries if e.get("status") in ("SMTP_ACCEPTED", "SMTP_DELIVERED")))
-            stat_cols[2].metric("Mock Dispatched", sum(1 for e in log_entries if e.get("status") in ("MOCK_DISPATCHED", "MOCK")))
-            stat_cols[3].metric("Delivery Failed", sum(1 for e in log_entries if e.get("status") == "FAILED"))
-            stat_cols[4].metric(
-                "Suppressed",
-                sum(1 for e in log_entries if "SUPPRESSED" in str(e.get("status", "")))
-            )
 
 
 # ═════════════════════════════════════════════════════════════════════════════

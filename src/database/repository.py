@@ -619,6 +619,7 @@ class DataGuardRepository:
         pipeline_id: Optional[str] = None,
         error_message: Optional[str] = None,
         channel: str = "EMAIL",
+        recipient: Optional[str] = None,
     ) -> int:
         """Records an alert dispatch attempt in immutable notification logs."""
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -626,8 +627,8 @@ class DataGuardRepository:
             cursor = conn.execute(
                 """INSERT INTO notification_logs
                    (timestamp, incident_code, pipeline_id, severity,
-                    recipients_json, subject, status, error_message, channel)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);""",
+                    recipients_json, subject, status, error_message, channel, recipient)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);""",
                 (
                     now,
                     incident_code,
@@ -638,6 +639,7 @@ class DataGuardRepository:
                     status,
                     error_message,
                     channel,
+                    recipient,
                 ),
             )
             return cursor.lastrowid
@@ -652,6 +654,44 @@ class DataGuardRepository:
             )
             return [dict(row) for row in cursor.fetchall()]
 
+    def get_notification_metrics(self) -> Dict[str, Any]:
+        """Calculates accurate email delivery statistics across all logs."""
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT COUNT(*) FROM notification_logs WHERE status NOT IN ('SUPPRESSED_COOLDOWN', 'SUPPRESSED_SEVERITY');"
+            )
+            attempted = cur.fetchone()[0]
+
+            cur.execute(
+                "SELECT COUNT(*) FROM notification_logs WHERE status IN ('SENT', 'SMTP_ACCEPTED');"
+            )
+            sent = cur.fetchone()[0]
+
+            cur.execute(
+                "SELECT COUNT(*) FROM notification_logs WHERE status = 'FAILED';"
+            )
+            failed = cur.fetchone()[0]
+
+            cur.execute(
+                "SELECT COUNT(*) FROM notification_logs WHERE status IN ('SIMULATED', 'MOCK_DISPATCHED');"
+            )
+            simulated = cur.fetchone()[0]
+
+            cur.execute(
+                "SELECT timestamp FROM notification_logs WHERE status IN ('SENT', 'SMTP_ACCEPTED') ORDER BY id DESC LIMIT 1;"
+            )
+            row = cur.fetchone()
+            last_delivery = row[0] if row else "Never"
+
+            return {
+                "attempted": attempted,
+                "sent": sent,
+                "failed": failed,
+                "simulated": simulated,
+                "last_delivery": last_delivery,
+            }
+
     def is_notification_in_cooldown(
         self, pipeline_id: str, incident_type: str, cooldown_minutes: int
     ) -> bool:
@@ -659,7 +699,7 @@ class DataGuardRepository:
         with get_db() as conn:
             cursor = conn.execute(
                 """SELECT timestamp FROM notification_logs
-                   WHERE pipeline_id = ? AND status IN ('SENT', 'SMTP_ACCEPTED', 'MOCK_DISPATCHED')
+                   WHERE pipeline_id = ? AND status IN ('SENT', 'SMTP_ACCEPTED', 'MOCK_DISPATCHED', 'SIMULATED')
                    ORDER BY id DESC LIMIT 1;""",
                 (pipeline_id,),
             )

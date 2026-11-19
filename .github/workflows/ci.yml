@@ -1,10 +1,10 @@
-name: DataGuard CI/CD Pipeline
+name: DataGuard Five-Member CI/CD Pipeline
 
 on:
   push:
-    branches: [ master, main ]
+    branches: [ main, develop ]
   pull_request:
-    branches: [ master, main ]
+    branches: [ main, develop ]
 
 jobs:
   test-and-lint:
@@ -29,16 +29,17 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # Step 4: Validate Python syntax across all packages
-      - name: Verify source code syntax
+      # Step 4: Validate Python syntax across all packages and contracts
+      - name: Verify source code and contract syntax
         run: |
           python -m py_compile src/ui/app.py
           python -m py_compile src/core/*.py
           python -m py_compile src/database/*.py
           python -m py_compile src/recovery/*.py
           python -m py_compile src/services/*.py
+          python -m py_compile contracts/*.py
 
-      # Step 5: Run full Pytest test suite (all 82 unit and integration tests)
+      # Step 5: Run full Pytest test suite (including contract validation)
       - name: Run Pytest test suite
         run: |
           pytest tests/ -v --color=yes

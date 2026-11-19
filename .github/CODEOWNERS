@@ -1,0 +1,67 @@
+# ==============================================================================
+# DataGuard Team CODEOWNERS
+# ==============================================================================
+# Member 1: DevOps & Platform Engineer (Lead)
+# Member 2: Data Engineering & Backend Developer
+# Member 3: Frontend & UI/UX Developer
+# Member 4: Data Quality & Detection Engineer
+# Member 5: Database, Audit, Security & QA Engineer
+# ==============================================================================
+
+# Global fallback: Member 1 owns platform and repo health
+* @Charitha-2007
+
+# Member 1 – DevOps and Platform Engineer
+# Repos, branching, CI/CD, Docker, environments, deployment
+.github/                                @Charitha-2007
+.github/workflows/                      @Charitha-2007
+Dockerfile                              @Charitha-2007
+docker-compose.yml                      @Charitha-2007
+.dockerignore                           @Charitha-2007
+config/                                 @Charitha-2007
+scripts/                                @Charitha-2007
+
+# Member 2 – Data Engineering and Backend Developer
+# Upload, validation, ingestion, pipeline execution, cleaner, simulation
+src/ingestion/                          @charukunagalakshmi-b
+src/services/dataset_service.py         @charukunagalakshmi-b
+src/services/data_cleaner.py            @charukunagalakshmi-b
+src/core/simulator.py                   @charukunagalakshmi-b
+contracts/ingestion_contracts.py        @charukunagalakshmi-b
+tests/test_dataset_service.py           @charukunagalakshmi-b
+tests/test_data_cleaner.py              @charukunagalakshmi-b
+tests/test_simulator.py                 @charukunagalakshmi-b
+
+# Member 3 – Frontend and UI/UX Developer
+# Dashboard, upload interface, monitoring, visual drift gauges, telemetry
+src/ui/                                 @boddukhanishkasivani-b
+src/ui/app.py                           @boddukhanishkasivani-b
+src/ui/components/                      @boddukhanishkasivani-b
+src/ui/views/                           @boddukhanishkasivani-b
+
+# Member 4 – Data Quality and Detection Engineer
+# Schema drift, distribution drift (PSI/KS), anomaly detection, SLA, recovery
+src/core/quality_engine.py              @dhanushreek-b
+src/core/drift_detector.py              @dhanushreek-b
+src/core/sla_monitor.py                 @dhanushreek-b
+src/core/rca_engine.py                  @dhanushreek-b
+src/core/impact_analyzer.py             @dhanushreek-b
+src/recovery/                           @dhanushreek-b
+contracts/quality_contracts.py          @dhanushreek-b
+tests/test_quality_engine.py            @dhanushreek-b
+tests/test_drift_detector.py            @dhanushreek-b
+tests/test_incidents_and_sla.py         @dhanushreek-b
+tests/test_recovery.py                  @dhanushreek-b
+
+# Member 5 – Database, Audit, Security and QA Engineer
+# Database architecture, SHA-256 ledger, RBAC auth, knowledge base, test suites
+src/database/                           @baddikrishnavishal-b
+src/services/audit_service.py           @baddikrishnavishal-b
+src/services/auth.py                    @baddikrishnavishal-b
+src/services/knowledge_base.py          @baddikrishnavishal-b
+contracts/repository_contracts.py       @baddikrishnavishal-b
+contracts/audit_contracts.py            @baddikrishnavishal-b
+tests/test_database.py                  @baddikrishnavishal-b
+tests/test_audit_and_kb.py              @baddikrishnavishal-b
+tests/test_audit_dataset_scenarios.py   @baddikrishnavishal-b
+tests/test_contracts.py                 @baddikrishnavishal-b

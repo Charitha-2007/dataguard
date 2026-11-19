@@ -31,7 +31,7 @@ COPY .streamlit/ .streamlit/
 COPY README.md .
 
 # Create persistent data directories
-RUN mkdir -p data/raw data/processed data/mock_pipeline_data
+RUN mkdir -p data/raw data/processed data/mock_pipeline_data data/uploads data/samples
 
 # Create non-root user for enterprise container security
 RUN useradd -m -u 1001 dataguard_user && \

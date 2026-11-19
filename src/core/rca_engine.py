@@ -137,8 +137,9 @@ class RootCauseAnalysisEngine:
                     },
                 )
 
-        # 5. Check for Volume Drops / Surges
-        if row_count < 20:
+        # 5. Check for Volume Drops / Surges (only for scheduled production pipelines with established baselines)
+        is_custom_dataset = pipeline_id.startswith("dataset_") or "DS-" in pipeline_id
+        if not is_custom_dataset and row_count < 20:
             return RCADiagnosis(
                 incident_type="VOLUME_ANOMALY",
                 severity="P2",

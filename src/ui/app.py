@@ -278,18 +278,33 @@ if "Overview" in page:
         "Ingest custom production batches (.csv, .xlsx, .xls, .json) into DataGuard for automated quality profiling and pipeline processing."
     )
 
+    # ── Upload state management (seamless multi-dataset upload & reset) ─────────
+    if "upload_key_counter" not in st.session_state:
+        st.session_state["upload_key_counter"] = 0
+
+    # Display flash notification from prior action if present
+    if "upload_flash" in st.session_state:
+        fl_type, fl_msg = st.session_state.pop("upload_flash")
+        if fl_type == "success":
+            st.success(fl_msg)
+        else:
+            st.error(fl_msg)
+
     with st.container(border=True):
         up_col1, up_col2 = st.columns([2, 1], gap="medium")
 
         with up_col1:
+            _uploader_key = f"overview_file_uploader_{st.session_state['upload_key_counter']}"
             uploaded_file = st.file_uploader(
                 "Choose a dataset file (Drag & Drop or Browse)",
                 type=["csv", "xlsx", "xls", "json"],
                 help="Supports CSV, Excel spreadsheets, and JSON array records up to 100MB.",
+                key=_uploader_key,
             )
             dataset_name_input = st.text_input(
                 "Dataset Display Name (Optional)",
                 placeholder="e.g. Q4 Financial Ledgers Ingestion",
+                key=f"ds_name_input_{st.session_state['upload_key_counter']}",
             )
 
         with up_col2:
@@ -321,12 +336,12 @@ if "Overview" in page:
                     p_c3.metric("Memory Usage", f"{meta['memory_mb']} MB")
                     p_c4.metric("Format", meta["file_type"].upper())
 
-                    st.dataframe(parsed_df.head(5), use_container_width=True)
+                    st.dataframe(parsed_df.head(5), width='stretch')
 
-                # Save and Ingest Actions
-                act_c1, act_c2 = st.columns([1, 1])
+                # Save, Ingest, and Clear Actions
+                act_c1, act_c2, act_c3 = st.columns([2, 2, 1])
                 with act_c1:
-                    if st.button("💾 Save to Dataset Catalog", type="primary", use_container_width=True):
+                    if st.button("💾 Save to Dataset Catalog", type="primary", width='stretch'):
                         with st.spinner("Saving dataset and running initial profiling..."):
                             saved = dataset_service.save_dataset(
                                 name=dataset_name_input or Path(filename).stem,
@@ -335,13 +350,15 @@ if "Overview" in page:
                                 raw_bytes=file_bytes,
                                 actor=current_user.username,
                             )
-                            st.success(
-                                f"🎉 Dataset **{saved.name}** saved to catalog (ID: `{saved.id}`)! Quality Score: **{saved.quality_score}%**"
+                            st.session_state["upload_flash"] = (
+                                "success",
+                                f"🎉 Dataset **{saved.name}** saved to catalog (ID: `{saved.id}`)! Quality Score: **{saved.quality_score}%**. Ready to upload another dataset below."
                             )
+                            st.session_state["upload_key_counter"] += 1
                             st.rerun()
 
                 with act_c2:
-                    if st.button("⚡ Save & Run 5-Stage Ingestion Pipeline", use_container_width=True):
+                    if st.button("⚡ Save & Run 5-Stage Ingestion Pipeline", width='stretch'):
                         with st.spinner("Saving and launching 5-stage observable pipeline..."):
                             saved = dataset_service.save_dataset(
                                 name=dataset_name_input or Path(filename).stem,
@@ -355,14 +372,18 @@ if "Overview" in page:
                             )
 
                             if result["status"] == "SUCCESS":
-                                st.success(
-                                    f"✨ Pipeline executed successfully in {result['total_duration_seconds']}s! Run ID: `{result['run_id']}`"
-                                )
+                                msg = f"✨ Dataset **{saved.name}** processed successfully in {result['total_duration_seconds']}s! (Run ID: `{result['run_id']}`). Ready for next upload."
+                                st.session_state["upload_flash"] = ("success", msg)
                             else:
-                                st.error(
-                                    f"❌ Pipeline failed quality gate. Incident ticket `{result['incident_code']}` generated in Incidents & Recovery."
-                                )
+                                msg = f"⚠️ Dataset **{saved.name}** ingested but failed quality gate! Incident ticket `{result['incident_code']}` opened in Incidents & Recovery."
+                                st.session_state["upload_flash"] = ("error", msg)
+                            st.session_state["upload_key_counter"] += 1
                             st.rerun()
+
+                with act_c3:
+                    if st.button("❌ Clear", width='stretch', help="Discard current selection and reset uploader"):
+                        st.session_state["upload_key_counter"] += 1
+                        st.rerun()
 
             except Exception as e:
                 st.error(f"❌ File Parsing Error: {str(e)}")
@@ -423,7 +444,7 @@ if "Overview" in page:
                         title="📉 Missing Value Count by Column",
                     )
                     styled_chart(fig_miss, 320)
-                    st.plotly_chart(fig_miss, use_container_width=True)
+                    st.plotly_chart(fig_miss, width='stretch')
                 else:
                     st.success("🟢 Zero missing values in this dataset! 100% complete.")
 
@@ -452,7 +473,7 @@ if "Overview" in page:
                     )
                 )
                 styled_chart(fig_donut, 320, "🍩 Column Data Types Composition")
-                st.plotly_chart(fig_donut, use_container_width=True)
+                st.plotly_chart(fig_donut, width='stretch')
 
     st.divider()
 
@@ -498,7 +519,7 @@ if "Overview" in page:
                 "error_message",
             ]
         ]
-        st.dataframe(df_runs, use_container_width=True, hide_index=True)
+        st.dataframe(df_runs, width='stretch', hide_index=True)
     else:
         st.info("No runs recorded yet.")
 
@@ -546,7 +567,7 @@ elif "Datasets" in page:
                 })
 
             df_cat = pd.DataFrame(ds_rows)
-            st.dataframe(df_cat, use_container_width=True, hide_index=True)
+            st.dataframe(df_cat, width='stretch', hide_index=True)
 
             st.divider()
 
@@ -562,7 +583,7 @@ elif "Datasets" in page:
                 with st.container(border=True):
                     st.markdown("#### 🔄 Reprocess Dataset")
                     st.caption("Re-evaluates missing values, duplicates, outliers, and recalculates the data health score.")
-                    if st.button("Run Reprocess", type="primary", use_container_width=True):
+                    if st.button("Run Reprocess", type="primary", width='stretch'):
                         df_to_reprocess = dataset_service.load_dataset_df(target_ds["id"])
                         if df_to_reprocess is not None:
                             with st.spinner("Reprocessing dataset profiling..."):
@@ -592,9 +613,9 @@ elif "Datasets" in page:
 
                     if not current_user.can_manage_settings:
                         st.error("⛔ Viewers cannot delete datasets. Switch to Admin.")
-                        st.button("Delete Dataset", disabled=True, use_container_width=True)
+                        st.button("Delete Dataset", disabled=True, width='stretch')
                     else:
-                        if st.button("Delete Dataset", type="secondary", disabled=not confirm_delete, use_container_width=True):
+                        if st.button("Delete Dataset", type="secondary", disabled=not confirm_delete, width='stretch'):
                             deleted = dataset_service.delete_dataset(target_ds["id"], actor=current_user.username)
                             if deleted:
                                 st.success(f"🗑️ Dataset '{target_ds['name']}' deleted.")
@@ -666,7 +687,7 @@ elif "Datasets" in page:
                         "Mean": c_meta.get("mean", "-"),
                         "Max": c_meta.get("max", "-"),
                     })
-                st.dataframe(pd.DataFrame(col_records), use_container_width=True, hide_index=True)
+                st.dataframe(pd.DataFrame(col_records), width='stretch', hide_index=True)
 
                 st.divider()
 
@@ -686,7 +707,7 @@ elif "Datasets" in page:
                             labels={"x": "Missing Row Count", "y": "Column"},
                         )
                         styled_chart(fig_m, 320)
-                        st.plotly_chart(fig_m, use_container_width=True)
+                        st.plotly_chart(fig_m, width='stretch')
                     else:
                         st.success("🟢 No missing values in any column!")
 
@@ -703,7 +724,7 @@ elif "Datasets" in page:
                             title=f"Distribution of '{selected_num}'",
                         )
                         styled_chart(fig_num, 320)
-                        st.plotly_chart(fig_num, use_container_width=True)
+                        st.plotly_chart(fig_num, width='stretch')
                     else:
                         st.info("No numerical columns detected for distribution plotting.")
 
@@ -731,7 +752,7 @@ elif "Datasets" in page:
                 st.error("⛔ Viewers cannot trigger pipeline executions. Switch to Admin or Engineer.")
                 st.button("🚀 Execute Ingestion Pipeline", disabled=True)
             else:
-                if st.button("🚀 Execute Ingestion Pipeline", type="primary", use_container_width=True):
+                if st.button("🚀 Execute Ingestion Pipeline", type="primary", width='stretch'):
                     with st.status("⚡ Executing 5-Stage Pipeline...", expanded=True) as pipe_status:
                         exec_result = dataset_service.execute_pipeline_on_dataset(
                             exec_target["id"], actor=current_user.username
@@ -836,10 +857,10 @@ elif "Simulator" in page:
 
             if not current_user.can_trigger_pipeline:
                 st.error("⛔ Viewers cannot trigger runs. Switch to Admin or Engineer.")
-                trigger = st.button("🚀 Trigger Pipeline Run", disabled=True, use_container_width=True)
+                trigger = st.button("🚀 Trigger Pipeline Run", disabled=True, width='stretch')
                 trigger = False
             else:
-                trigger = st.button("🚀 Trigger Pipeline Run", type="primary", use_container_width=True)
+                trigger = st.button("🚀 Trigger Pipeline Run", type="primary", width='stretch')
 
     with out_col:
         st.subheader("📡 Real-Time Telemetry & Diagnosis")
@@ -917,7 +938,7 @@ elif "Simulator" in page:
                 )
 
             with st.expander("🔎 Data Sample Preview (First 5 Rows)", expanded=False):
-                st.dataframe(df.head(5), use_container_width=True)
+                st.dataframe(df.head(5), width='stretch')
         else:
             with st.container(border=True):
                 st.markdown("""
@@ -1025,7 +1046,7 @@ elif "Incidents" in page:
                 yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
             )
             styled_chart(fig_dag, 220)
-            st.plotly_chart(fig_dag, use_container_width=True)
+            st.plotly_chart(fig_dag, width='stretch')
 
         with right_inc:
             st.subheader("🛠️ Approval-Gated Self-Healing Recovery")
@@ -1052,10 +1073,10 @@ elif "Incidents" in page:
 
                     if not current_user.can_approve_recovery:
                         st.error("⛔ Viewers cannot approve recovery. Switch to Admin or Engineer.")
-                        st.button("Authorize & Execute Recovery", disabled=True, use_container_width=True)
+                        st.button("Authorize & Execute Recovery", disabled=True, width='stretch')
                     else:
                         st.markdown(f"**Approver:** `{current_user.username}` ({current_user.role})")
-                        if st.button("✅ Authorize & Execute Recovery", type="primary", use_container_width=True):
+                        if st.button("✅ Authorize & Execute Recovery", type="primary", width='stretch'):
                             with st.status("Authorizing and executing recovery...", expanded=True) as rec_status:
                                 workflow.approve_recovery(
                                     act_id, approved_by=current_user.username, user_role=current_user.role
@@ -1101,30 +1122,112 @@ elif "Drift" in page:
     )
     st.divider()
 
-    ctrl1, ctrl2, ctrl3 = st.columns([2, 2, 1])
-    with ctrl1:
-        drift_pipe = st.selectbox(
-            "Target Pipeline",
-            ["crm_customers_etl", "billing_transactions_sync"],
-            format_func=lambda x: "CRM Customer Profiles ETL" if x == "crm_customers_etl" else "Billing Transactions Sync",
-        )
-    with ctrl2:
-        shift_mult = st.slider("Distribution Shift Multiplier", 1.0, 8.0, 2.5, 0.25)
-    with ctrl3:
-        st.markdown("<br>", unsafe_allow_html=True)
-        st.button("🔍 Analyze", type="primary", use_container_width=True)
+    all_uploaded_ds = dataset_service.get_all_datasets()
+    data_source_mode = st.radio(
+        "Drift Evaluation Source",
+        ["📁 Custom Uploaded Dataset", "🧪 Synthetic Simulator Pipeline"],
+        horizontal=True,
+    )
 
-    np.random.seed(42)
-    if drift_pipe == "crm_customers_etl":
-        ref_df = simulator.generate_crm_data(400)
-        cur_df = simulator.generate_crm_data(400)
-        target_col = "account_balance"
+    if data_source_mode == "📁 Custom Uploaded Dataset":
+        if not all_uploaded_ds:
+            st.info("ℹ️ No uploaded datasets found in the catalog. Please upload a dataset in the **Overview** dashboard first.")
+            st.stop()
+
+        ds_choice_map = {
+            f"{d['name']} ({d['filename']} · {d['row_count']} rows)": d
+            for d in all_uploaded_ds
+        }
+        col_ds1, col_ds2 = st.columns([2, 2])
+        with col_ds1:
+            chosen_ds_label = st.selectbox("Select Target Dataset", list(ds_choice_map.keys()))
+            target_ds_meta = ds_choice_map[chosen_ds_label]
+            raw_target_df = dataset_service.load_dataset_df(target_ds_meta["id"])
+
+        if raw_target_df is None or raw_target_df.empty:
+            st.warning("Could not load data for the selected dataset.")
+            st.stop()
+
+        # Identify numeric columns excluding IDs
+        num_candidates = [
+            c for c in raw_target_df.select_dtypes(include=[np.number]).columns
+            if not c.lower().endswith("_id") and c.lower() not in ["id", "index"]
+        ]
+
+        if not num_candidates:
+            st.warning(f"No numeric feature columns found in '{target_ds_meta['name']}' suitable for statistical drift.")
+            st.stop()
+
+        with col_ds2:
+            target_col = st.selectbox("Select Numerical Feature Column", num_candidates)
+
+        # Evaluation mode: Comparison with second dataset or distribution shift simulation
+        compare_mode = "Shift Multiplier Simulation"
+        second_ds_df = None
+        if len(all_uploaded_ds) > 1:
+            compare_mode = st.radio(
+                "Evaluation Method",
+                ["Shift Multiplier Simulation", "Compare Against Another Dataset"],
+                horizontal=True,
+            )
+
+        if compare_mode == "Compare Against Another Dataset":
+            other_options = {
+                f"{d['name']} ({d['filename']})": d
+                for d in all_uploaded_ds if d["id"] != target_ds_meta["id"]
+            }
+            c_other = st.selectbox("Select Baseline Dataset to Compare Against", list(other_options.keys()))
+            other_meta = other_options[c_other]
+            second_ds_df = dataset_service.load_dataset_df(other_meta["id"])
+            shift_mult = 1.0
+
+            if target_col not in second_ds_df.columns:
+                st.error(f"Baseline dataset '{other_meta['name']}' does not contain column '{target_col}'.")
+                st.stop()
+
+            ref_df = second_ds_df.dropna(subset=[target_col])
+            cur_df = raw_target_df.dropna(subset=[target_col])
+        else:
+            shift_mult = st.slider("Distribution Shift Multiplier (Injected into Current Batch)", 1.0, 8.0, 2.0, 0.25)
+            # Split dataset into reference baseline and current batch
+            valid_df = raw_target_df.dropna(subset=[target_col]).copy()
+            if len(valid_df) < 20:
+                st.warning("Dataset has fewer than 20 rows. Replicating rows for statistical validity.")
+                valid_df = pd.concat([valid_df] * 5, ignore_index=True)
+
+            mid = len(valid_df) // 2
+            ref_df = valid_df.iloc[:mid].copy()
+            cur_df = valid_df.iloc[mid:].copy()
+            cur_df[target_col] = cur_df[target_col] * shift_mult
+
+        drift_pipe = f"dataset_{target_ds_meta['id']}"
+
     else:
-        ref_df = simulator.generate_billing_data(400)
-        cur_df = simulator.generate_billing_data(400)
-        target_col = "amount"
+        # Synthetic simulator pipeline mode
+        ctrl1, ctrl2, ctrl3 = st.columns([2, 2, 1])
+        with ctrl1:
+            drift_pipe = st.selectbox(
+                "Target Pipeline",
+                ["crm_customers_etl", "billing_transactions_sync"],
+                format_func=lambda x: "CRM Customer Profiles ETL" if x == "crm_customers_etl" else "Billing Transactions Sync",
+            )
+        with ctrl2:
+            shift_mult = st.slider("Distribution Shift Multiplier", 1.0, 8.0, 2.5, 0.25)
+        with ctrl3:
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.button("🔍 Analyze", type="primary", width='stretch')
 
-    cur_df[target_col] = cur_df[target_col] * shift_mult
+        np.random.seed(42)
+        if drift_pipe == "crm_customers_etl":
+            ref_df = simulator.generate_crm_data(400)
+            cur_df = simulator.generate_crm_data(400)
+            target_col = "account_balance"
+        else:
+            ref_df = simulator.generate_billing_data(400)
+            cur_df = simulator.generate_billing_data(400)
+            target_col = "amount"
+
+        cur_df[target_col] = cur_df[target_col] * shift_mult
 
     drift_report = drift_detector.evaluate(drift_pipe, ref_df, cur_df, [target_col])
     drift_res = drift_report.column_drifts[target_col]
@@ -1170,7 +1273,7 @@ elif "Drift" in page:
         )
         fig_hist.update_layout(barmode="overlay")
         styled_chart(fig_hist, 360, f"Distribution Overlay — '{target_col}'")
-        st.plotly_chart(fig_hist, use_container_width=True)
+        st.plotly_chart(fig_hist, width='stretch')
 
     with ch2:
         gauge_color = "#10B981" if psi < 0.1 else ("#F59E0B" if psi < 0.2 else "#F43F5E")
@@ -1204,7 +1307,7 @@ elif "Drift" in page:
             height=360,
             margin=dict(l=30, r=30, t=50, b=20),
         )
-        st.plotly_chart(fig_gauge, use_container_width=True)
+        st.plotly_chart(fig_gauge, width='stretch')
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1236,7 +1339,7 @@ elif "Audit" in page:
             df_audit = pd.DataFrame(records)[
                 ["id", "timestamp", "actor", "action", "entity_type", "entity_id", "record_hash"]
             ]
-            st.dataframe(df_audit, use_container_width=True, hide_index=True)
+            st.dataframe(df_audit, width='stretch', hide_index=True)
             csv_data = df_audit.to_csv(index=False).encode("utf-8")
             st.download_button(
                 "📥 Export Audit Trail as CSV",
@@ -1286,3 +1389,4 @@ elif "Audit" in page:
         else:
             st.error(f"🔴 **TAMPERING DETECTED**: {integrity.get('reason')}")
             st.metric("Chain Integrity", "COMPROMISED", delta_color="inverse")
+

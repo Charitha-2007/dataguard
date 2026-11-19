@@ -142,7 +142,32 @@ class DatasetService:
         return df, meta
 
     def _read_csv_with_fallback(self, buffer: Union[io.BytesIO, str]) -> pd.DataFrame:
-        """Reads CSV with encoding fallback (utf-8, latin-1, cp1252) and delimiter detection."""
+        """Reads CSV with encoding fallback (utf-8, latin-1, cp1252) and delimiter detection.
+        
+        Validates against binary file headers and null bytes to prevent binary masquerading.
+        """
+        # Inspect header bytes to reject binary files disguised as CSV
+        sample = b""
+        if isinstance(buffer, io.BytesIO):
+            buffer.seek(0)
+            sample = buffer.read(1024)
+            buffer.seek(0)
+        elif isinstance(buffer, str) and Path(buffer).exists():
+            with open(buffer, "rb") as f:
+                sample = f.read(1024)
+
+        KNOWN_BINARY_MAGIC = [
+            b"\x89PNG",        # PNG image
+            b"\xff\xd8\xff",    # JPEG image
+            b"%PDF",            # PDF document
+            b"PK\x03\x04",      # ZIP archive / docx / xlsx
+            b"GIF87a", b"GIF89a",  # GIF image
+            b"\x7fELF",         # Linux executable/shared library
+            b"MZ",              # Windows executable / DLL
+        ]
+        if any(sample.startswith(magic) for magic in KNOWN_BINARY_MAGIC) or b"\x00" in sample:
+            raise ValueError("The provided file appears to be a binary file, not a valid plain text CSV.")
+
         encodings = ["utf-8", "latin-1", "cp1252"]
         last_error = None
 
@@ -323,8 +348,8 @@ class DatasetService:
                 "outliers_count": 0,
             }
 
-            # Numeric columns profiling
-            if pd.api.types.is_numeric_dtype(series):
+            # Numeric columns profiling (exclude booleans from quantile calculations)
+            if pd.api.types.is_numeric_dtype(series) and not pd.api.types.is_bool_dtype(series):
                 numeric_cols.append(col)
                 clean_num = series.dropna()
                 if len(clean_num) > 0:
@@ -739,7 +764,7 @@ class DatasetService:
         total_duration = round(time.time() - start_time, 3)
 
         diagnosis = self.rca_engine.diagnose(
-            pipeline_id=f"pipeline_{dataset_id}",
+            pipeline_id=f"dataset_{dataset_id}",
             sla_seconds=300,
             duration_seconds=total_duration,
             row_count=len(df),

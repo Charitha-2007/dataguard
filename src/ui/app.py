@@ -529,6 +529,25 @@ if "Overview" in page:
     else:
         st.info("No runs recorded yet.")
 
+    # Admin maintenance control to clean test/demo statistics on demand
+    if current_user.role == "admin":
+        with st.expander("🛠️ Admin Maintenance & Metrics Hygiene"):
+            st.caption(
+                "Safely clean orphaned test pipelines and synthetic failure experiments, "
+                "restoring verified production telemetry while preserving all datasets and credentials."
+            )
+            confirm_clean = st.checkbox(
+                "I confirm I want to clean orphaned test executions and recalculate production metrics.",
+                key="admin_confirm_cleanup",
+            )
+            if st.button("🧹 Clean Test Records & Reset Metrics", type="secondary", disabled=not confirm_clean):
+                res = repo.cleanup_test_records(actor=current_user.username)
+                st.success(
+                    f"✅ Database cleaned! Removed {res['deleted_orphaned_pipelines']} orphaned pipeline(s), "
+                    f"{res['deleted_runs']} test run(s), and resolved {res['resolved_incidents']} synthetic incident(s)."
+                )
+                st.rerun()
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # VIEW 2 — DATASETS & INGESTION MANAGEMENT

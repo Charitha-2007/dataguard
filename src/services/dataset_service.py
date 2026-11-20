@@ -616,6 +616,18 @@ class DatasetService:
 
         success = self.repo.delete_dataset(dataset_id)
         if success:
+            # Clean up dynamic pipeline entry and child records to prevent orphan data
+            pipe_id = f"dataset_{dataset_id}"
+            try:
+                from src.database.connection import get_db
+                with get_db() as conn:
+                    conn.execute("DELETE FROM recovery_actions WHERE pipeline_id = ?;", (pipe_id,))
+                    conn.execute("DELETE FROM incidents WHERE pipeline_id = ?;", (pipe_id,))
+                    conn.execute("DELETE FROM pipeline_runs WHERE pipeline_id = ?;", (pipe_id,))
+                    conn.execute("DELETE FROM pipelines WHERE id = ?;", (pipe_id,))
+            except Exception:
+                pass
+
             self.repo.log_audit_event(
                 actor=actor,
                 action="DATASET_DELETED",

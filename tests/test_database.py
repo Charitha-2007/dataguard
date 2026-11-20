@@ -192,3 +192,7 @@ def test_audit_log_hash_chain_and_tamper_detection():
     tamper_result = repo.verify_audit_log_integrity()
     assert tamper_result["is_valid"] is False
     assert "Tampering detected" in tamper_result["reason"] or "Hash chain broken" in tamper_result["reason"]
+
+    # Restore untampered state for test idempotency
+    with get_db() as conn:
+        conn.execute("UPDATE audit_logs SET actor = 'system' WHERE id = (SELECT id FROM audit_logs LIMIT 1 OFFSET 1);")

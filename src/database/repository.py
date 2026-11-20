@@ -714,3 +714,76 @@ class DataGuardRepository:
                 return elapsed_mins < cooldown_minutes
             except Exception:
                 return False
+
+    def cleanup_test_records(self, actor: str = "admin") -> Dict[str, Any]:
+        """Safely cleans orphaned test/demo pipelines, orphaned runs, and mock notification entries."""
+        with get_db() as conn:
+            # Active datasets
+            active_ds = [r["id"] for r in conn.execute("SELECT id FROM uploaded_datasets;").fetchall()]
+            core_pipes = {
+                "crm_customers_etl",
+                "billing_transactions_sync",
+                "analytics_user_events",
+                "warehouse_finance_mart",
+            }
+            allowed_pipes = core_pipes.union({f"dataset_{d}" for d in active_ds})
+
+            # Orphaned pipelines
+            all_pipes = [r["id"] for r in conn.execute("SELECT id FROM pipelines;").fetchall()]
+            orphaned = [p for p in all_pipes if p not in allowed_pipes]
+
+            deleted_actions = 0
+            deleted_incidents = 0
+            deleted_runs = 0
+            deleted_pipes = len(orphaned)
+
+            if orphaned:
+                placeholders = ",".join(["?"] * len(orphaned))
+                cur = conn.execute(
+                    f"DELETE FROM recovery_actions WHERE pipeline_id IN ({placeholders});", orphaned
+                )
+                deleted_actions = cur.rowcount
+                cur = conn.execute(
+                    f"DELETE FROM incidents WHERE pipeline_id IN ({placeholders});", orphaned
+                )
+                deleted_incidents = cur.rowcount
+                cur = conn.execute(
+                    f"DELETE FROM pipeline_runs WHERE pipeline_id IN ({placeholders});", orphaned
+                )
+                deleted_runs = cur.rowcount
+                conn.execute(f"DELETE FROM pipelines WHERE id IN ({placeholders});", orphaned)
+
+            # Close synthetic open incidents on core pipelines so baseline is healthy
+            cur = conn.execute(
+                "UPDATE incidents SET status = 'RECOVERED', resolved_at = datetime('now', 'localtime') WHERE status = 'OPEN';"
+            )
+            resolved_incidents = cur.rowcount
+
+            # Clean legacy mock notification logs
+            cur = conn.execute(
+                "DELETE FROM notification_logs WHERE channel LIKE '%MOCK%' OR recipient IS NULL;"
+            )
+            deleted_mock_notifs = cur.rowcount
+
+        # Log audit entry
+        self.log_audit_event(
+            actor=actor,
+            action="TEST_RECORDS_CLEANED",
+            entity_type="SYSTEM",
+            entity_id="MAINTENANCE",
+            details={
+                "deleted_orphaned_pipelines": deleted_pipes,
+                "deleted_runs": deleted_runs,
+                "deleted_incidents": deleted_incidents,
+                "resolved_incidents": resolved_incidents,
+                "deleted_mock_notifications": deleted_mock_notifs,
+            },
+        )
+
+        return {
+            "deleted_orphaned_pipelines": deleted_pipes,
+            "deleted_runs": deleted_runs,
+            "deleted_incidents": deleted_incidents,
+            "resolved_incidents": resolved_incidents,
+            "deleted_mock_notifications": deleted_mock_notifs,
+        }
